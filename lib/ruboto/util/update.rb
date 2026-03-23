@@ -217,7 +217,7 @@ module Ruboto
         if jruby_jars_version
           version_requirement = %{ -v "#{jruby_jars_version}"}
         end
-        `gem list -i -n jruby-jars#{version_requirement}`
+        `gem list -i jruby-jars#{version_requirement}`
         unless $? == 0
           local_gem_dir = ENV['LOCAL_GEM_DIR'] || Dir.getwd
           local_gem_file = "#{local_gem_dir}/jruby-jars-#{jruby_jars_version}.gem"

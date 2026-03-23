@@ -191,6 +191,149 @@ module Ruboto
         # end
       end
 
+      def generate_gradle_project(root, package, name, target_level, min_sdk_level)
+        FileUtils.mkdir_p root
+
+        # Root build.gradle
+        File.open(File.join(root, 'build.gradle'), 'w') do |f|
+          f << <<~GRADLE
+            // Top-level build file
+            plugins {
+                id 'com.android.application' version '8.7.3' apply false
+            }
+          GRADLE
+        end
+
+        # settings.gradle
+        File.open(File.join(root, 'settings.gradle'), 'w') do |f|
+          f << <<~GRADLE
+            pluginManagement {
+                repositories {
+                    google()
+                    mavenCentral()
+                    gradlePluginPortal()
+                }
+            }
+            dependencyResolutionManagement {
+                repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+                repositories {
+                    google()
+                    mavenCentral()
+                }
+            }
+            rootProject.name = '#{name}'
+            include ':app'
+          GRADLE
+        end
+
+        # gradle.properties
+        File.open(File.join(root, 'gradle.properties'), 'w') do |f|
+          f << <<~PROPS
+            android.useAndroidX=true
+            org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          PROPS
+        end
+
+        # app/build.gradle
+        app_dir = File.join(root, 'app')
+        FileUtils.mkdir_p app_dir
+        File.open(File.join(app_dir, 'build.gradle'), 'w') do |f|
+          f << <<~GRADLE
+            plugins {
+                id 'com.android.application'
+            }
+
+            android {
+                namespace '#{package}'
+                compileSdk #{target_level}
+
+                defaultConfig {
+                    applicationId '#{package}'
+                    minSdk #{min_sdk_level}
+                    targetSdk #{target_level}
+                    versionCode 1
+                    versionName '1.0'
+                }
+
+                buildTypes {
+                    release {
+                        minifyEnabled false
+                    }
+                }
+
+                compileOptions {
+                    sourceCompatibility JavaVersion.VERSION_1_8
+                    targetCompatibility JavaVersion.VERSION_1_8
+                }
+
+                sourceSets {
+                    main {
+                        java.srcDirs = ['src/main/java']
+                        resources.srcDirs = ['src/main/resources']
+                    }
+                }
+            }
+
+            dependencies {
+                implementation fileTree(dir: '../libs', include: ['*.jar'])
+            }
+          GRADLE
+        end
+
+        # AndroidManifest.xml
+        manifest_dir = File.join(app_dir, 'src', 'main')
+        FileUtils.mkdir_p manifest_dir
+        File.open(File.join(manifest_dir, 'AndroidManifest.xml'), 'w') do |f|
+          f << <<~XML
+            <?xml version="1.0" encoding="utf-8"?>
+            <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+                <uses-sdk android:minSdkVersion="#{min_sdk_level}" android:targetSdkVersion="#{target_level}"/>
+                <application
+                    android:icon="@drawable/ic_launcher"
+                    android:label="#{name}"
+                    android:hardwareAccelerated="true"
+                    android:largeHeap="true">
+                </application>
+            </manifest>
+          XML
+        end
+
+        # Java source directory
+        java_dir = File.join(manifest_dir, 'java', *package.split('.'))
+        FileUtils.mkdir_p java_dir
+
+        # Resources directory
+        FileUtils.mkdir_p File.join(manifest_dir, 'resources')
+
+        # res directories
+        FileUtils.mkdir_p File.join(root, 'res', 'values')
+        File.open(File.join(root, 'res', 'values', 'strings.xml'), 'w') do |f|
+          f << <<~XML
+            <?xml version="1.0" encoding="utf-8"?>
+            <resources>
+                <string name="app_name">#{name}</string>
+            </resources>
+          XML
+        end
+
+        # libs directory
+        FileUtils.mkdir_p File.join(root, 'libs')
+
+        # project.properties (for backward compat with ruboto tooling)
+        File.open(File.join(root, 'project.properties'), 'w') do |f|
+          f << "target=android-#{target_level}\n"
+        end
+
+        # Gemfile for the app's bundled gems
+        File.open(File.join(app_dir, 'gems.rb'), 'w') do |f|
+          f << <<~RUBY
+            source 'https://rubygems.org'
+          RUBY
+        end
+
+        puts "Created Gradle project structure in #{root}"
+      end
+
       def methods_header
         <<EOF
     private final ScriptInfo scriptInfo = new ScriptInfo();

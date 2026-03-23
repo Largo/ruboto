@@ -30,10 +30,10 @@ module RubotoTest
     Gem.refresh
   end
 
-  `gem list -i -n bundler`
+  `gem list -i bundler`
   system 'gem install bundler --no-document' unless $? == 0
   `bundle check`
-  system 'bundle --system' unless $? == 0
+  system 'bundle install' unless $? == 0
   lib_path = File.expand_path('lib', File.dirname(File.dirname(__FILE__)))
   $LOAD_PATH.unshift lib_path unless $LOAD_PATH.include?(lib_path)
   require 'ruboto'
@@ -62,14 +62,14 @@ module RubotoTest
   end
 
   def uninstall_gem(name)
-    `gem list -i -n #{name}`
+    `gem list -i #{name}`
     system "gem uninstall -x --all #{name}" if $? == 0
     assert_equal 0, $?, "uninstall of #{name} failed with return code #$?"
   end
 
   def install_ruboto_gem(version)
     version_requirement = "-v #{version}"
-    `gem list -i -n ^ruboto$ #{version_requirement}`
+    `gem list -i ^ruboto$ #{version_requirement}`
     system "gem install ruboto #{version_requirement} --no-document" unless $? == 0
     raise "install of ruboto #{version} failed with return code #$?" unless $? == 0
   end

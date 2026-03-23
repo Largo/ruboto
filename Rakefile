@@ -45,7 +45,7 @@ end
 task :install => :gem do
   old_rubyopt = ENV['RUBYOPT']
   ENV['RUBYOPT'] = nil
-  `gem list -i -n ^ruboto$ -v #{Ruboto::VERSION}`
+  `gem list -i ruboto -v #{Ruboto::VERSION}`
   if $? != 0
     puts 'Installing gem'
     cmd = "gem install ruboto-#{Ruboto::VERSION}.gem"
@@ -64,7 +64,7 @@ end
 task :uninstall do
   old_rubyopt = ENV['RUBYOPT']
   ENV['RUBYOPT'] = nil
-  `gem list -i -n ^ruboto$ -v #{Ruboto::VERSION}`
+  `gem list -i ruboto -v #{Ruboto::VERSION}`
   if $? == 0
     puts 'Uninstalling gem'
     cmd = "gem uninstall -x ruboto -v #{Ruboto::VERSION}"
