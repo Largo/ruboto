@@ -46,7 +46,7 @@ module Ruboto
             def run
               path = params['path'].value || Dir.getwd
               with_jruby = params['with-jruby'].value
-              with_jruby = '9.2.9.0' unless with_jruby.is_a?(Gem::Version)
+              with_jruby = '10.0.4.0' unless with_jruby.is_a?(Gem::Version)
 
               root = File.expand_path(path)
 

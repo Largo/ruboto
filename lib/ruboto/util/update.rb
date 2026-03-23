@@ -447,10 +447,42 @@ module Ruboto
               File.delete jruby_core
               gem_version = Gem::Version.new(jruby_core_version.to_s.tr('-', '.'))
 
-              puts "New code!!!  gem_version: #{gem_version.inspect}"
-              puts "gem_version >= Gem::Version.new('9.2.0.0'): #{gem_version >= Gem::Version.new('9.2.0.0')}"
+              puts "gem_version: #{gem_version.inspect}"
 
-              if gem_version >= Gem::Version.new('9.2.0.0')
+              if gem_version >= Gem::Version.new('10.0.0.0')
+                #noinspection RubyLiteralArrayInspection
+                excluded_core_packages = [
+                    'META-INF',
+                    'com/headius/options/example',
+                    'com/kenai/constantine',
+                    'com/kenai/jffi',
+                    'com/kenai/jnr/x86asm',
+                    'com/martiansoftware',
+                    'jni',
+                    'jnr/constants/platform/darwin',
+                    'jnr/constants/platform/fake',
+                    'jnr/constants/platform/freebsd',
+                    'jnr/constants/platform/openbsd',
+                    'jnr/ffi/annotations',
+                    'jnr/ffi/byref',
+                    'jnr/ffi/mapper',
+                    'jnr/ffi/provider',
+                    'jnr/ffi/util',
+                    'jnr/ffi/Struct$*',
+                    'jnr/ffi/types',
+                    'jnr/posix/Aix*',
+                    'jnr/posix/FreeBSD*',
+                    'jnr/posix/MacOS*',
+                    'jnr/posix/OpenBSD*',
+                    'jnr/x86asm',
+                    'org/jruby/ant',
+                    'org/jruby/embed/bsf',
+                    'org/jruby/embed/jsr223',
+                    'org/jruby/embed/osgi',
+                    'org/jruby/ext/ffi/Enums*',
+                    'org/jruby/javasupport/bsf',
+                ]
+              elsif gem_version >= Gem::Version.new('9.2.0.0')
                 #noinspection RubyLiteralArrayInspection
                 excluded_core_packages = [
 
