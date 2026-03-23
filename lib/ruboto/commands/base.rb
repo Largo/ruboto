@@ -308,7 +308,7 @@ module Ruboto
                 if old_version && Gem::Version.new(old_version) < Gem::Version.new(Ruboto::UPDATE_VERSION_LIMIT)
                   puts "Detected old Ruboto version: #{old_version}"
                   puts "Will use Ruboto #{Ruboto::UPDATE_VERSION_LIMIT} to update it first."
-                  `gem query -i -n ruboto -v #{Ruboto::UPDATE_VERSION_LIMIT}`
+                  `gem list -i -n ruboto -v #{Ruboto::UPDATE_VERSION_LIMIT}`
                   system "gem install ruboto -v #{Ruboto::UPDATE_VERSION_LIMIT}" unless $? == 0
                   raise "Install of Ruboto #{Ruboto::UPDATE_VERSION_LIMIT} failed!" unless $? == 0
                   system "ruboto _#{Ruboto::UPDATE_VERSION_LIMIT}_ update app"

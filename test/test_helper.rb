@@ -30,7 +30,7 @@ module RubotoTest
     Gem.refresh
   end
 
-  `gem query -i -n bundler`
+  `gem list -i -n bundler`
   system 'gem install bundler --no-document' unless $? == 0
   `bundle check`
   system 'bundle --system' unless $? == 0
@@ -62,14 +62,14 @@ module RubotoTest
   end
 
   def uninstall_gem(name)
-    `gem query --no-installed -n #{name}`
-    system "gem uninstall -x --all #{name}" if $? != 0
+    `gem list -i -n #{name}`
+    system "gem uninstall -x --all #{name}" if $? == 0
     assert_equal 0, $?, "uninstall of #{name} failed with return code #$?"
   end
 
   def install_ruboto_gem(version)
     version_requirement = "-v #{version}"
-    `gem query -i -n ^ruboto$ #{version_requirement}`
+    `gem list -i -n ^ruboto$ #{version_requirement}`
     system "gem install ruboto #{version_requirement} --no-document" unless $? == 0
     raise "install of ruboto #{version} failed with return code #$?" unless $? == 0
   end
@@ -89,7 +89,7 @@ module RubotoTest
   puts "ANDROID_OS: #{ANDROID_OS}"
   puts "ANDROID_TARGET: #{ANDROID_TARGET}"
 
-  RUBOTO_CMD = "ruby -rubygems -I #{PROJECT_DIR}/lib #{PROJECT_DIR}/bin/ruboto"
+  RUBOTO_CMD = "ruby -I #{PROJECT_DIR}/lib #{PROJECT_DIR}/bin/ruboto"
 
   RUBOTO_PLATFORM = ENV['RUBOTO_PLATFORM'] || 'CURRENT'
   puts "RUBOTO_PLATFORM: #{RUBOTO_PLATFORM}"
@@ -161,7 +161,7 @@ class Minitest::Test
     raise "Unknown options: #{options.inspect}" unless options.empty?
     raise 'Inclusion/exclusion of libs requires standalone mode.' if (included_stdlibs || excluded_stdlibs) && !standalone
 
-    Dir.mkdir_p TMP_DIR
+    FileUtils.mkdir_p TMP_DIR
 
     FileUtils.rm_rf APP_DIR if File.exist? APP_DIR
     template_dir = "#{APP_DIR}_template_#{$$}"
