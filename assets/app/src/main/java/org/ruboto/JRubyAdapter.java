@@ -159,8 +159,11 @@ public class JRubyAdapter {
     }
 
     private static void setSystemProperties(Context appContext) {
+        // Android reports java.specification.version as "1.6" but JRuby 10
+        // expects a simple integer (e.g. "11"). Override before JRuby loads.
+        System.setProperty("java.specification.version", "11");
         System.setProperty("jruby.backtrace.style", "normal"); // normal raw full mri
-        System.setProperty("jruby.bytecode.version", "1.6");
+        System.setProperty("jruby.bytecode.version", "11");
         // System.setProperty("jruby.compile.backend", "DALVIK");
         System.setProperty("jruby.compile.mode", "OFF"); // OFF OFFIR JITIR? FORCE FORCEIR
         System.setProperty("jruby.interfaces.useProxy", "true");

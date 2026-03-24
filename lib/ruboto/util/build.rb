@@ -199,7 +199,7 @@ module Ruboto
           f << <<~GRADLE
             // Top-level build file
             plugins {
-                id 'com.android.application' version '8.7.3' apply false
+                id 'com.android.application' version '8.9.0' apply false
             }
           GRADLE
         end
@@ -253,6 +253,7 @@ module Ruboto
                     targetSdk #{target_level}
                     versionCode 1
                     versionName '1.0'
+                    multiDexEnabled true
                 }
 
                 buildTypes {
@@ -262,14 +263,27 @@ module Ruboto
                 }
 
                 compileOptions {
-                    sourceCompatibility JavaVersion.VERSION_1_8
-                    targetCompatibility JavaVersion.VERSION_1_8
+                    sourceCompatibility JavaVersion.VERSION_17
+                    targetCompatibility JavaVersion.VERSION_17
                 }
 
                 sourceSets {
                     main {
                         java.srcDirs = ['src/main/java']
                         resources.srcDirs = ['src/main/resources']
+                    }
+                }
+
+                packaging {
+                    resources {
+                        excludes += [
+                            'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA',
+                            'META-INF/LICENSE', 'META-INF/LICENSE.txt',
+                            'META-INF/NOTICE', 'META-INF/NOTICE.txt',
+                            'META-INF/INDEX.LIST', 'META-INF/MANIFEST.MF',
+                            'META-INF/maven/**',
+                            'META-INF/services/javax.script.ScriptEngineFactory'
+                        ]
                     }
                 }
             }
@@ -305,15 +319,27 @@ module Ruboto
         # Resources directory
         FileUtils.mkdir_p File.join(manifest_dir, 'resources')
 
-        # res directories
-        FileUtils.mkdir_p File.join(root, 'res', 'values')
-        File.open(File.join(root, 'res', 'values', 'strings.xml'), 'w') do |f|
+        # res directories (under app/src/main/res/ for Gradle)
+        res_dir = File.join(manifest_dir, 'res')
+        FileUtils.mkdir_p File.join(res_dir, 'values')
+        File.open(File.join(res_dir, 'values', 'strings.xml'), 'w') do |f|
           f << <<~XML
             <?xml version="1.0" encoding="utf-8"?>
             <resources>
                 <string name="app_name">#{name}</string>
             </resources>
           XML
+        end
+
+        # Copy launcher icons into res
+        assets_res = File.join(Ruboto::ASSETS, 'res')
+        %w[drawable-hdpi drawable-mdpi drawable-ldpi].each do |dpi|
+          icon_src = File.join(assets_res, dpi, 'ic_launcher.png')
+          if File.exist?(icon_src)
+            icon_dest_dir = File.join(res_dir, dpi)
+            FileUtils.mkdir_p icon_dest_dir
+            FileUtils.cp icon_src, icon_dest_dir
+          end
         end
 
         # libs directory
