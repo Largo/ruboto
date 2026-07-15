@@ -4,6 +4,32 @@ Ruboto 2 is a redesign based on an [Android Studio](https://developer.android.co
 This means that the JRuby and Ruboto components will integrate into the standard gradle tooling used by
 regular Android Studio projects.
 
+## Quick start: build the Todo sample app
+
+You need a JDK (17+), the Android SDK (set `ANDROID_HOME`), and Ruby.
+No Android Studio required.
+
+```shell
+# 1. Get ruboto
+git clone https://github.com/ruboto/ruboto.git
+cd ruboto && bundle install && cd ..
+
+# 2. Generate an app named "Todo" (installs the latest JRuby automatically)
+ruby -Iruboto/lib ruboto/bin/ruboto gen app --package org.ruboto.todo --name Todo --path todo
+
+# 3. Make it a todo list app
+cp ruboto/assets/samples/todo_activity.rb todo/app/src/main/resources/todo_activity.rb
+
+# 4. Build the APK
+cd todo && gradle assembleDebug
+
+# 5. Install it on your phone (enable USB debugging first)
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+The whole app is one Ruby file: [`assets/samples/todo_activity.rb`](assets/samples/todo_activity.rb).
+Edit it, rebuild, reinstall — that is the entire development cycle.
+
 ## Starting a new Ruboto project
 
 * Download and install [Android studio](https://developer.android.com/studio/).
