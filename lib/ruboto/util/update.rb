@@ -196,6 +196,7 @@ module Ruboto
         log_action("Removing #{installed_jruby_core}") { File.delete *Dir.glob('libs/jruby-core-*.jar') } if installed_jruby_core
         log_action("Removing #{installed_jruby_stdlib}") { File.delete *Dir.glob('libs/jruby-stdlib-*.jar') } if installed_jruby_stdlib
         log_action("Copying #{JRubyJars::core_jar_path} to libs") { FileUtils.cp JRubyJars::core_jar_path, "libs/jruby-core-#{new_jruby_version}.jar" }
+        log_action("Copying #{JRubyJars::stdlib_jar_path} to libs") { FileUtils.cp JRubyJars::stdlib_jar_path, "libs/jruby-stdlib-#{new_jruby_version}.jar" }
 
         unless File.read('project.properties') =~ /^dex.force.jumbo=/
           log_action('Setting JUMBO dex file format') do
@@ -203,8 +204,11 @@ module Ruboto
           end
         end
 
-        log_action("Copying #{DX_JAR} to libs") do
-          copier.copy 'libs'
+        # The dx-based runtime proxy tooling only works with JRuby 9.x.
+        if Gem::Version.new(new_jruby_version.to_s.tr('-', '.')) < Gem::Version.new('10.0.0.0')
+          log_action("Copying #{DX_JAR} to libs") do
+            copier.copy 'libs'
+          end
         end
 
         reconfigure_jruby_libs(new_jruby_version)
@@ -423,8 +427,11 @@ module Ruboto
 
       def reconfigure_jruby_libs(jruby_version)
         reconfigure_jruby_core(jruby_version)
-        reconfigure_jruby_stdlib(jruby_version)
-        reconfigure_dx_jar
+        # JRuby finds its standard library via META-INF/jruby.home inside the
+        # stdlib jar, so the jar is used as-is and needs no reconfiguration.
+        if Gem::Version.new(jruby_version.to_s.tr('-', '.')) < Gem::Version.new('10.0.0.0')
+          reconfigure_dx_jar
+        end
       end
 
       # - Removes unneeded code from jruby-core
@@ -446,37 +453,32 @@ module Ruboto
               puts "gem_version: #{gem_version.inspect}"
 
               if gem_version >= Gem::Version.new('10.0.0.0')
+                # JRuby 10 initializes jnr-ffi/jnr-posix eagerly, even with
+                # jruby.native.enabled=false, so the jnr/ffi and com/kenai/jffi
+                # packages must stay.  Only code for foreign platforms and
+                # on-demand integrations is removed.  Android is Linux, so the
+                # linux platform constants are kept.
                 #noinspection RubyLiteralArrayInspection
                 excluded_core_packages = [
-                    'META-INF',
-                    'com/headius/options/example',
-                    'com/kenai/constantine',
-                    'com/kenai/jffi',
-                    'com/kenai/jnr/x86asm',
-                    'com/martiansoftware',
+                    'META-INF/maven',
                     'jni',
+                    'jnr/constants/platform/aix',
                     'jnr/constants/platform/darwin',
+                    'jnr/constants/platform/dragonflybsd',
                     'jnr/constants/platform/fake',
                     'jnr/constants/platform/freebsd',
                     'jnr/constants/platform/openbsd',
-                    'jnr/ffi/annotations',
-                    'jnr/ffi/byref',
-                    'jnr/ffi/mapper',
-                    'jnr/ffi/provider',
-                    'jnr/ffi/util',
-                    'jnr/ffi/Struct$*',
-                    'jnr/ffi/types',
+                    'jnr/constants/platform/solaris',
+                    'jnr/constants/platform/windows',
                     'jnr/posix/Aix*',
+                    'jnr/posix/DragonFly*',
                     'jnr/posix/FreeBSD*',
                     'jnr/posix/MacOS*',
                     'jnr/posix/OpenBSD*',
-                    'jnr/x86asm',
+                    'jnr/posix/Solaris*',
                     'org/jruby/ant',
-                    'org/jruby/embed/bsf',
                     'org/jruby/embed/jsr223',
                     'org/jruby/embed/osgi',
-                    'org/jruby/ext/ffi/Enums*',
-                    'org/jruby/javasupport/bsf',
                 ]
               elsif gem_version >= Gem::Version.new('9.2.0.0')
                 #noinspection RubyLiteralArrayInspection
@@ -747,34 +749,39 @@ module Ruboto
               #  FileUtils.rm_rf dir
               #end
 
-              # Add our proxy class factory
-              android_jar = Dir["#{ANDROID_HOME.gsub("\\", '/')}/platforms/android-26/android.jar"][0]
+              # Add our proxy class factory.  JRuby 10 removed the APIs these
+              # classes depend on (JavaProxyClassFactory, jitescript), so the
+              # dx-based runtime code generation is only used with JRuby 9.x.
+              if gem_version < Gem::Version.new('10.0.0.0')
+                android_jar = Dir["#{ANDROID_HOME.gsub("\\", '/')}/platforms/android-*/android.jar"]
+                    .max_by { |f| f[/android-(\d+)/, 1].to_i }
 
-              puts "android_jar: #{android_jar.inspect}"
+                puts "android_jar: #{android_jar.inspect}"
 
-              unless android_jar
-                puts
-                puts '*' * 80
-                puts "    Could not find any Android platforms in #{ANDROID_HOME}/platforms."
-                puts '    At least one Android Platform SDK must be installed to compile the Ruboto classes.'
-                puts '    Please install an Android Platform SDK using the "android" package manager.'
-                puts '*' * 80
-                puts
-                exit 1
+                unless android_jar
+                  puts
+                  puts '*' * 80
+                  puts "    Could not find any Android platforms in #{ANDROID_HOME}/platforms."
+                  puts '    At least one Android Platform SDK must be installed to compile the Ruboto classes.'
+                  puts '    Please install an Android Platform SDK using the "android" package manager.'
+                  puts '*' * 80
+                  puts
+                  exit 1
+                end
+                android_jar.gsub!(File::SEPARATOR, File::ALT_SEPARATOR || File::SEPARATOR)
+                class_path = ['.', "#{Ruboto::ASSETS}/libs/#{DX_JAR}", "#{Ruboto::ASSETS}/libs/#{DEXMAKER_JAR}"]
+                    .join(File::PATH_SEPARATOR).gsub(File::SEPARATOR, File::ALT_SEPARATOR || File::SEPARATOR)
+                source_dirs = "#{Ruboto::GEM_ROOT}/lib/*.java"
+                # TODO(uwe): Remove when we stop supporting Android 6.0 and below
+                if project_api_level.to_i < 24
+                  source_dirs << " #{Ruboto::GEM_ROOT}/lib/overrides_below_24/*.java"
+                end
+                # ODOT
+                sources = source_dirs.gsub(File::SEPARATOR, File::ALT_SEPARATOR || File::SEPARATOR)
+                puts "javac -source 8 -target 8 -cp #{class_path} -bootclasspath #{android_jar} -d . #{sources}"
+                `javac -source 8 -target 8 -cp #{class_path} -bootclasspath #{android_jar} -d . #{sources}`
+                raise 'Compile failed' unless $? == 0
               end
-              android_jar.gsub!(File::SEPARATOR, File::ALT_SEPARATOR || File::SEPARATOR)
-              class_path = ['.', "#{Ruboto::ASSETS}/libs/#{DX_JAR}", "#{Ruboto::ASSETS}/libs/#{DEXMAKER_JAR}"]
-                  .join(File::PATH_SEPARATOR).gsub(File::SEPARATOR, File::ALT_SEPARATOR || File::SEPARATOR)
-              source_dirs = "#{Ruboto::GEM_ROOT}/lib/*.java"
-              # TODO(uwe): Remove when we stop supporting Android 6.0 and below
-              if project_api_level.to_i < 24
-                source_dirs << " #{Ruboto::GEM_ROOT}/lib/overrides_below_24/*.java"
-              end
-              # ODOT
-              sources = source_dirs.gsub(File::SEPARATOR, File::ALT_SEPARATOR || File::SEPARATOR)
-              puts "javac -source 1.7 -target 1.7 -cp #{class_path} -bootclasspath #{android_jar} -d . #{sources}"
-              `javac -source 1.7 -target 1.7 -cp #{class_path} -bootclasspath #{android_jar} -d . #{sources}`
-              raise 'Compile failed' unless $? == 0
 
               `jar -cf ..#{File::ALT_SEPARATOR || File::SEPARATOR}#{jruby_core} .`
               raise "Creating repackaged jruby-core jar failed: #$?" unless $? == 0

@@ -45,8 +45,9 @@ module Ruboto
             }
             def run
               path = params['path'].value || Dir.getwd
+              # nil means "install the latest available jruby-jars version"
               with_jruby = params['with-jruby'].value
-              with_jruby = '10.0.4.0' unless with_jruby.is_a?(Gem::Version)
+              with_jruby = with_jruby.is_a?(Gem::Version) ? with_jruby.to_s : nil
 
               root = File.expand_path(path)
 
@@ -120,8 +121,9 @@ module Ruboto
                 name = params['name'].value || package.split('.').last.split('_').map(&:capitalize).join
                 target = params['target'].value
                 min_sdk = params['min-sdk'].value
+                # nil means "install the latest available jruby-jars version"
                 with_jruby = params['with-jruby'].value
-                with_jruby = '10.0.4.0' unless with_jruby.is_a?(Gem::Version)
+                with_jruby = with_jruby.is_a?(Gem::Version) ? with_jruby.to_s : nil
 
                 target_level = target[API_NUMBER_PATTERN]
                 min_sdk_level = min_sdk.to_s[/\d+/]
@@ -138,6 +140,7 @@ module Ruboto
                   update_ruboto true
                   update_classes nil, 'exclude'
                   update_core_classes 'exclude'
+                  update_jruby true, with_jruby
 
                   update_manifest min_sdk_level, target_level
 
