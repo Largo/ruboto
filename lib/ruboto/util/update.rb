@@ -749,6 +749,10 @@ module Ruboto
               #  FileUtils.rm_rf dir
               #end
 
+              if gem_version >= Gem::Version.new('10.0.0.0')
+                patch_jruby_core_for_android
+              end
+
               # Add our proxy class factory.  JRuby 10 removed the APIs these
               # classes depend on (JavaProxyClassFactory, jitescript), so the
               # dx-based runtime code generation is only used with JRuby 9.x.
@@ -789,6 +793,33 @@ module Ruboto
             FileUtils.remove_dir 'tmp', true
           end
         end
+      end
+
+      # Makes the unpacked jruby-core classes in the current directory work on
+      # Android (ART):
+      # - Replaces classes that need java.lang.invoke.SwitchPoint or runtime
+      #   bytecode generation (both unavailable on ART) with Android-safe
+      #   implementations from lib/jruby10_overrides.
+      # - Rewrites Class.getModule()/Module.canRead() calls (java.lang.Module
+      #   does not exist on ART) via an ASM-based bytecode patcher.
+      def patch_jruby_core_for_android
+        overrides_dir = "#{Ruboto::GEM_ROOT}/lib/jruby10_overrides"
+        asm_jar = "#{Ruboto::ASSETS}/libs/asm-9.7.1.jar"
+
+        print 'Replacing SwitchPoint and scope generation classes...'
+        override_sources = Dir["#{overrides_dir}/*.java"] - ["#{overrides_dir}/JRuby10AndroidPatcher.java"]
+        `javac -cp . -d . #{override_sources.join(' ')}`
+        raise 'Compiling Android overrides failed' unless $? == 0
+
+        print 'Patching java.lang.Module usage...'
+        tool_dir = '../android_patcher'
+        FileUtils.rm_rf tool_dir
+        FileUtils.mkdir_p tool_dir
+        `javac -cp #{asm_jar} -d #{tool_dir} #{overrides_dir}/JRuby10AndroidPatcher.java`
+        raise 'Compiling Android patcher failed' unless $? == 0
+        puts `java -cp #{asm_jar}#{File::PATH_SEPARATOR}#{tool_dir} JRuby10AndroidPatcher .`
+        raise 'Patching classes for Android failed' unless $? == 0
+        FileUtils.rm_rf tool_dir
       end
 
       def reconfigure_dx_jar
