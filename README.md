@@ -34,19 +34,21 @@ Edit it, rebuild, reinstall — that is the entire development cycle.
 
 ### Using gems
 
-RubyGems itself is disabled on Android (it cannot scan gem specifications
-inside the APK), but pure-Ruby gems work fine: put their `lib` files into
-`app/src/main/resources`, which is on the load path inside the APK, and
-`require` them as usual.  The Todo sample uses the
+RubyGems is fully enabled on Android.  Gems ship pre-installed inside the
+APK: install them into `app/src/main/resources/gem_home` on your computer
+and RubyGems activates them straight out of the APK at runtime — `gem` and
+`require` work exactly as usual.  The Todo sample bundles the
 [humanize](https://rubygems.org/gems/humanize) gem this way:
 
 ```shell
-gem fetch humanize && gem unpack humanize-*.gem
-cp -r humanize-*/lib/* todo/app/src/main/resources/
+gem install humanize --install-dir todo/app/src/main/resources/gem_home --no-document
+rm -rf todo/app/src/main/resources/gem_home/{cache,doc,build_info,extensions,plugins}
 ```
 
-Vendor a gem's runtime dependencies the same way.  Gems with native (C)
-extensions do not work; look for a pure-Ruby or Java-based alternative.
+Gems with native (C) extensions do not work; look for a pure-Ruby or
+Java-based alternative.  Gems that load Java libraries at runtime cannot do
+so on Android — add the Java library to the `dependencies` block in
+`app/build.gradle` instead, so it is compiled into the app.
 
 ## Starting a new Ruboto project
 

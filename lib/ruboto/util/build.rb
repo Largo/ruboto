@@ -289,8 +289,6 @@ module Ruboto
                             'META-INF/jruby.home/bin/**',
                             'META-INF/jruby.home/lib/ruby/gems/**',
                             'META-INF/jruby.home/lib/ruby/stdlib/org/**',
-                            'META-INF/jruby.home/lib/ruby/stdlib/rubygems/**',
-                            'META-INF/jruby.home/lib/ruby/stdlib/rubygems.rb',
                             'META-INF/jruby.home/lib/ruby/stdlib/bundler/**',
                             'META-INF/jruby.home/lib/ruby/stdlib/bundler.rb',
                             'META-INF/jruby.home/lib/ruby/stdlib/jopenssl.jar',

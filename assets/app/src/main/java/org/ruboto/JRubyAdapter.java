@@ -76,7 +76,10 @@ public class JRubyAdapter {
                 try {
                     apkName = appContext.getPackageManager()
                             .getApplicationInfo(appContext.getPackageName(), 0).sourceDir;
-                    final String jrubyHome = "jar:file:" + apkName + "!/META-INF/jruby.home";
+                    // The uri:classloader: scheme is fully supported by JRuby's
+                    // file system layer (globbing included), which jar:file: is
+                    // not.  RubyGems needs that support during boot.
+                    final String jrubyHome = "uri:classloader://META-INF/jruby.home";
                     Log.i("Setting JRUBY_HOME: " + jrubyHome);
                     System.setProperty("jruby.home", jrubyHome);
                 } catch (NameNotFoundException e) {
@@ -95,13 +98,21 @@ public class JRubyAdapter {
 
                 //////////////////////////////////
                 //
-                // Disable rubygems
+                // Configure RubyGems
                 //
-                // RubyGems cannot scan gem specifications inside the APK's
-                // jar: URI (path expansion fails), so it must stay disabled.
-                // Bundled gems are loaded via the load path instead.
+                // Gems ship pre-installed in GEM_HOME layout under gem_home/
+                // in the APK (see "Using gems" in the Ruboto README), served
+                // directly from the class loader.  JARS_REQUIRE=false stops
+                // jar-dependencies from loading .jar files at runtime, which
+                // Android cannot do; Java libraries gems need must be dexed
+                // into the app instead.
                 org.jruby.RubyInstanceConfig config = new org.jruby.RubyInstanceConfig();
-                config.setDisableGems(true);
+                java.util.Map<String, String> environment =
+                        new java.util.HashMap<String, String>(System.getenv());
+                environment.put("GEM_HOME", "uri:classloader://gem_home");
+                environment.put("GEM_PATH", "uri:classloader://gem_home");
+                environment.put("JARS_REQUIRE", "false");
+                config.setEnvironment(environment);
                 if (appContext.getFilesDir() != null) {
                     config.setCurrentDirectory(appContext.getFilesDir().getPath());
                 }

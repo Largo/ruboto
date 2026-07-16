@@ -1,9 +1,11 @@
 require 'ruboto/widget'
 require 'ruboto/toast'
 
-# Gems work by putting their lib files into app/src/main/resources, which
-# ends up on the load path inside the APK.  The humanize gem turns the todo
-# count into words below.  See "Using gems" in the README.
+# RubyGems is fully enabled: gems ship pre-installed under gem_home/ in
+# app/src/main/resources and are activated straight out of the APK.  The
+# humanize gem turns the todo count into words below.  See "Using gems"
+# in the README.
+gem 'humanize'
 require 'humanize'
 
 ruboto_import_widgets :Button, :EditText, :LinearLayout, :ListView, :TextView
@@ -17,7 +19,7 @@ ruboto_import_widgets :Button, :EditText, :LinearLayout, :ListView, :TextView
 class TodoActivity
   def onCreate(bundle)
     super
-    set_title 'Ruboto Todo'
+    set_title "Ruboto Todo · RubyGems #{Gem::VERSION}"
     @todos = load_todos
 
     # fits_system_windows keeps the layout out from under the status bar on
