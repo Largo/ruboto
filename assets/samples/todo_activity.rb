@@ -15,8 +15,10 @@ class TodoActivity
     set_title 'Ruboto Todo'
     @todos = load_todos
 
+    # fits_system_windows keeps the layout out from under the status bar on
+    # Android 15+, where edge-to-edge rendering is enforced.
     self.content_view =
-        linear_layout orientation: :vertical do
+        linear_layout orientation: :vertical, fits_system_windows: true do
           @new_todo = edit_text hint: 'What needs doing?',
                                 layout: {width: :match_parent}
           button text: 'Add',
