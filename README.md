@@ -32,6 +32,22 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 The whole app is one Ruby file: [`assets/samples/todo_activity.rb`](assets/samples/todo_activity.rb).
 Edit it, rebuild, reinstall — that is the entire development cycle.
 
+### Using gems
+
+RubyGems itself is disabled on Android (it cannot scan gem specifications
+inside the APK), but pure-Ruby gems work fine: put their `lib` files into
+`app/src/main/resources`, which is on the load path inside the APK, and
+`require` them as usual.  The Todo sample uses the
+[humanize](https://rubygems.org/gems/humanize) gem this way:
+
+```shell
+gem fetch humanize && gem unpack humanize-*.gem
+cp -r humanize-*/lib/* todo/app/src/main/resources/
+```
+
+Vendor a gem's runtime dependencies the same way.  Gems with native (C)
+extensions do not work; look for a pure-Ruby or Java-based alternative.
+
 ## Starting a new Ruboto project
 
 * Download and install [Android studio](https://developer.android.com/studio/).
