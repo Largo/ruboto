@@ -97,8 +97,14 @@ public class JRubyAdapter {
                 //
                 // Disable rubygems
                 //
+                // RubyGems cannot scan gem specifications inside the APK's
+                // jar: URI (path expansion fails), so it must stay disabled.
+                // Bundled gems are loaded via the load path instead.
                 org.jruby.RubyInstanceConfig config = new org.jruby.RubyInstanceConfig();
-//                config.setDisableGems(true);
+                config.setDisableGems(true);
+                if (appContext.getFilesDir() != null) {
+                    config.setCurrentDirectory(appContext.getFilesDir().getPath());
+                }
 
                 ClassLoader classLoader = JRubyAdapter.class.getClassLoader();
                 config.setLoader(classLoader);
