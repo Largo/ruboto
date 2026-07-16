@@ -97,8 +97,14 @@ public class JRubyAdapter {
                 //
                 // Disable rubygems
                 //
+                // RubyGems cannot scan gem specifications inside the APK's
+                // jar: URI (path expansion fails), so it must stay disabled.
+                // Bundled gems are loaded via the load path instead.
                 org.jruby.RubyInstanceConfig config = new org.jruby.RubyInstanceConfig();
-//                config.setDisableGems(true);
+                config.setDisableGems(true);
+                if (appContext.getFilesDir() != null) {
+                    config.setCurrentDirectory(appContext.getFilesDir().getPath());
+                }
 
                 ClassLoader classLoader = JRubyAdapter.class.getClassLoader();
                 config.setLoader(classLoader);
@@ -166,6 +172,12 @@ public class JRubyAdapter {
         System.setProperty("jruby.bytecode.version", "11");
         // System.setProperty("jruby.compile.backend", "DALVIK");
         System.setProperty("jruby.compile.mode", "OFF"); // OFF OFFIR JITIR? FORCE FORCEIR
+        // ART has no java.lang.invoke.SwitchPoint, so keep JRuby off the
+        // invokedynamic-based call site and constant caching paths.
+        System.setProperty("jruby.compile.invokedynamic", "false");
+        // ART cannot load bytecode generated at runtime, so bind the core
+        // classes' methods with MethodHandles instead of generated invokers.
+        System.setProperty("jruby.invokedynamic.handles", "true");
         System.setProperty("jruby.interfaces.useProxy", "true");
         System.setProperty("jruby.ir.passes", "LocalOptimizationPass,DeadCodeElimination");
         System.setProperty("jruby.management.enabled", "false");

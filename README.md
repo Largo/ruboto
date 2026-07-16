@@ -7,7 +7,9 @@ regular Android Studio projects.
 ## Quick start: build the Todo sample app
 
 You need a JDK (17+), the Android SDK (set `ANDROID_HOME`), and Ruby.
-No Android Studio required.
+No Android Studio required.  Apps built with JRuby 10 run on
+**Android 13 (API 33) or newer** — JRuby 10 relies on
+`java.lang.invoke.VarHandle`, which became public Android API in 13.
 
 ```shell
 # 1. Get ruboto

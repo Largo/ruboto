@@ -15,8 +15,10 @@ class TodoActivity
     set_title 'Ruboto Todo'
     @todos = load_todos
 
+    # fits_system_windows keeps the layout out from under the status bar on
+    # Android 15+, where edge-to-edge rendering is enforced.
     self.content_view =
-        linear_layout orientation: :vertical do
+        linear_layout orientation: :vertical, fits_system_windows: true do
           @new_todo = edit_text hint: 'What needs doing?',
                                 layout: {width: :match_parent}
           button text: 'Add',
@@ -25,7 +27,9 @@ class TodoActivity
           @hint = text_view text: 'Tap a todo to mark it done.',
                             padding: [20, 20, 20, 20],
                             gravity: :center
-          @list = list_view list: @todos,
+          # The adapter gets a copy: a Ruby Array is a java.util.List, so
+          # passing @todos itself would let the adapter clear our array.
+          @list = list_view list: @todos.dup,
                             layout: {width: :match_parent, height: :match_parent},
                             on_item_click_listener: proc { |_parent, _view, position, _id| finish_todo(position) }
         end
@@ -46,14 +50,14 @@ class TodoActivity
     @todos << text
     @new_todo.text = ''
     save_todos
-    @list.reload_list(@todos)
+    @list.reload_list(@todos.dup)
     update_hint
   end
 
   def finish_todo(position)
     done = @todos.delete_at(position)
     save_todos
-    @list.reload_list(@todos)
+    @list.reload_list(@todos.dup)
     update_hint
     toast "Done: #{done}"
   end
