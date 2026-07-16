@@ -244,8 +244,11 @@ def setup_list_view
     end
 
     def reload_list(list)
+      # Copy first: if the caller passes the adapter's own backing list
+      # (a Ruby Array is a java.util.List), clear would empty it.
+      items = list.to_a.dup
       adapter.clear
-      adapter.addAll(list)
+      adapter.addAll(items)
       adapter.notifyDataSetChanged
       invalidate
     end
@@ -266,8 +269,11 @@ def setup_spinner
     end
 
     def reload_list(list)
+      # Copy first: if the caller passes the adapter's own backing list
+      # (a Ruby Array is a java.util.List), clear would empty it.
+      items = list.to_a.dup
       adapter.clear
-      adapter.addAll(list)
+      adapter.addAll(items)
       adapter.notifyDataSetChanged
       invalidate
     end

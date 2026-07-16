@@ -282,7 +282,22 @@ module Ruboto
                             'META-INF/NOTICE', 'META-INF/NOTICE.txt',
                             'META-INF/INDEX.LIST', 'META-INF/MANIFEST.MF',
                             'META-INF/maven/**',
-                            'META-INF/services/javax.script.ScriptEngineFactory'
+                            'META-INF/services/javax.script.ScriptEngineFactory',
+                            // Parts of the JRuby standard library that cannot
+                            // work on Android or are unused with RubyGems
+                            // disabled.  Saves about 30 MB uncompressed.
+                            'META-INF/jruby.home/bin/**',
+                            'META-INF/jruby.home/lib/ruby/gems/**',
+                            'META-INF/jruby.home/lib/ruby/stdlib/org/**',
+                            'META-INF/jruby.home/lib/ruby/stdlib/rubygems/**',
+                            'META-INF/jruby.home/lib/ruby/stdlib/rubygems.rb',
+                            'META-INF/jruby.home/lib/ruby/stdlib/bundler/**',
+                            'META-INF/jruby.home/lib/ruby/stdlib/bundler.rb',
+                            'META-INF/jruby.home/lib/ruby/stdlib/jopenssl.jar',
+                            'META-INF/jruby.home/lib/ruby/stdlib/jline/**',
+                            'META-INF/jruby.home/lib/ruby/stdlib/libfixposix/**',
+                            'META-INF/jruby.home/lib/ruby/stdlib/ffi/**',
+                            'META-INF/jruby.home/lib/ruby/stdlib/syntax_suggest/**'
                         ]
                     }
                 }
