@@ -169,6 +169,9 @@ public class JRubyAdapter {
         // ART has no java.lang.invoke.SwitchPoint, so keep JRuby off the
         // invokedynamic-based call site and constant caching paths.
         System.setProperty("jruby.compile.invokedynamic", "false");
+        // ART cannot load bytecode generated at runtime, so bind the core
+        // classes' methods with MethodHandles instead of generated invokers.
+        System.setProperty("jruby.invokedynamic.handles", "true");
         System.setProperty("jruby.interfaces.useProxy", "true");
         System.setProperty("jruby.ir.passes", "LocalOptimizationPass,DeadCodeElimination");
         System.setProperty("jruby.management.enabled", "false");
