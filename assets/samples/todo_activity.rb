@@ -1,6 +1,11 @@
 require 'ruboto/widget'
 require 'ruboto/toast'
 
+# Gems work by putting their lib files into app/src/main/resources, which
+# ends up on the load path inside the APK.  The humanize gem turns the todo
+# count into words below.  See "Using gems" in the README.
+require 'humanize'
+
 ruboto_import_widgets :Button, :EditText, :LinearLayout, :ListView, :TextView
 
 # A minimal Todo list app.
@@ -63,7 +68,13 @@ class TodoActivity
   end
 
   def update_hint
-    @hint.text = @todos.empty? ? 'No todos.  Add one above!' : 'Tap a todo to mark it done.'
+    @hint.text =
+        if @todos.empty?
+          'No todos.  Add one above!'
+        else
+          count = @todos.size
+          "You have #{count.humanize} #{count == 1 ? 'todo' : 'todos'}.  Tap one to mark it done."
+        end
   end
 
   def todo_file
