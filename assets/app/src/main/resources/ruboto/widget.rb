@@ -81,22 +81,26 @@ def invoke_with_converted_arguments(target, method_name, values)
 end
 
 View.class_eval do
-  @@convert_constants ||= {}
+  # Ruby 3+ forbids class variable access from class_eval blocks, so the
+  # conversion table lives in a class-level instance variable instead.
+  def self.constant_conversions
+    @convert_constants ||= {}
+  end
 
   def self.add_constant_conversion(from, to)
     symbol = from.to_s.downcase.to_sym
-    if @@convert_constants.include?(symbol)
-      puts "WARNING: Overwriting symbol to constant conversion for #{symbol.inspect}:  #{@@convert_constants[symbol].inspect} => #{to.inspect}"
+    if constant_conversions.include?(symbol)
+      puts "WARNING: Overwriting symbol to constant conversion for #{symbol.inspect}:  #{constant_conversions[symbol].inspect} => #{to.inspect}"
     end
-    @@convert_constants[symbol] = to
+    constant_conversions[symbol] = to
   end
 
   def self.convert_constant(from)
     return from unless from.is_a?(Symbol)
-    unless @@convert_constants.include?(from)
+    unless constant_conversions.include?(from)
       raise "Symbol #{from.inspect} doesn't have a corresponding View constant #{from.to_s.upcase}."
     end
-    @@convert_constants[from]
+    constant_conversions[from]
   end
 
   def self.setup_constant_conversion
