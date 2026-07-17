@@ -297,6 +297,10 @@ module Ruboto
                             'META-INF/jruby.home/lib/ruby/stdlib/ffi/**',
                             'META-INF/jruby.home/lib/ruby/stdlib/syntax_suggest/**'
                         ]
+                        // AGP excludes hidden files by default, but JRuby needs
+                        // its .jrubydir index files (in the stdlib and in
+                        // gem_home) to list directories inside the APK.
+                        excludes -= ['**/.*', '**/.*/**']
                     }
                 }
             }

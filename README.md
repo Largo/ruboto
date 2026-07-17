@@ -43,6 +43,7 @@ and RubyGems activates them straight out of the APK at runtime — `gem` and
 ```shell
 gem install humanize --install-dir todo/app/src/main/resources/gem_home --no-document
 rm -rf todo/app/src/main/resources/gem_home/{cache,doc,build_info,extensions,plugins}
+cd todo && rake gem_home_index   # write .jrubydir indexes so JRuby can list the APK dirs
 ```
 
 Gems with native (C) extensions do not work; look for a pure-Ruby or

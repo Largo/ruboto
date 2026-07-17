@@ -280,3 +280,22 @@ file BUNDLE_JAR => [GEM_FILE, GEM_LOCK_FILE] do
   end
   FileUtils.rm_rf BUNDLE_PATH
 end
+
+desc 'Write .jrubydir index files under app/src/main/resources/gem_home so JRuby can list gem directories inside the APK'
+task :gem_home_index do
+  index = lambda do |dir|
+    entries = Dir.children(dir).reject { |e| e == '.jrubydir' }.sort
+    File.write(File.join(dir, '.jrubydir'), (['..', '.'] + entries).join("\n") + "\n")
+    entries.each do |e|
+      path = File.join(dir, e)
+      index.call(path) if File.directory?(path)
+    end
+  end
+  gem_home = 'app/src/main/resources/gem_home'
+  if File.directory?(gem_home)
+    index.call(gem_home)
+    puts "Indexed #{Dir.glob("#{gem_home}/**/.jrubydir").size + 1} directories in #{gem_home}"
+  else
+    puts "No #{gem_home} directory found."
+  end
+end
