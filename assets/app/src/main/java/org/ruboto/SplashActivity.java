@@ -58,6 +58,7 @@ public class SplashActivity extends Activity {
                 final boolean jrubyOk = JRubyAdapter.setUpJRuby(SplashActivity.this);
                 if (jrubyOk) {
                     Log.d("SplashActivity onResume: JRuby OK");
+                    preloadUserActivityScript();
                     startUserActivity();
                 } else {
                     runOnUiThread(new Runnable() {
@@ -120,6 +121,17 @@ public class SplashActivity extends Activity {
             }
         }
         super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    // Evaluate the script for the Activity we are about to start, while we are
+    // still on the background thread and the splash is covering for us.  Doing it
+    // in that Activity's onCreate blocks the UI thread past the input dispatcher's
+    // 5 second focus timeout and the app is killed before it draws.
+    private void preloadUserActivityScript() {
+        Intent userIntent = (Intent) getIntent().getParcelableExtra(Intent.EXTRA_INTENT);
+        if (userIntent != null && userIntent.getComponent() != null) {
+            ScriptLoader.preloadScript(userIntent.getComponent().getClassName());
+        }
     }
 
     private void startUserActivity() {
