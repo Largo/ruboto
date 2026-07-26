@@ -97,16 +97,30 @@ public class ScriptLoader {
             JRubyAdapter.runScriptlet(rubyClassName + " = $" + rubyClassName);
 
             // Evaluated on its own thread to keep the stack size loadScript uses.
+            // join() does not rethrow what the child threw, so the failure is
+            // handed back deliberately; without this a script that raises while
+            // being evaluated would reach Android's default handler and kill the
+            // process from under the splash.
+            final Throwable[] failure = new Throwable[1];
             Thread t = new Thread(null, new Runnable() {
                 public void run() {
                     long loadStart = System.currentTimeMillis();
-                    JRubyAdapter.setScriptFilename(rubyScript.getAbsolutePath());
-                    JRubyAdapter.runScriptlet(script);
-                    Log.d("Preload took " + (System.currentTimeMillis() - loadStart) + "ms");
+                    try {
+                        JRubyAdapter.setScriptFilename(rubyScript.getAbsolutePath());
+                        JRubyAdapter.runScriptlet(script);
+                        Log.d("Preload took " + (System.currentTimeMillis() - loadStart) + "ms");
+                    } catch (Throwable e) {
+                        failure[0] = e;
+                    }
                 }
             }, "ScriptLoader preload for " + rubyClassName, 128 * 1024);
             t.start();
             t.join();
+            if (failure[0] != null) {
+                // Leave the reporting to loadScript, which knows the component.
+                Log.e("Preloading " + rubyClassName + " failed: " + failure[0]);
+                return;
+            }
             clearMethodCache();
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
