@@ -48,6 +48,69 @@ cp -r humanize-*/lib/* todo/app/src/main/resources/
 Vendor a gem's runtime dependencies the same way.  Gems with native (C)
 extensions do not work; look for a pure-Ruby or Java-based alternative.
 
+Watch out for dependencies that look like they are already there.  `humanize`
+requires `bigdecimal`, which JRuby ships as a *default gem* under
+`META-INF/jruby.home/lib/ruby/gems/`, and the generated `build.gradle` excludes
+that whole tree to keep the APK small.  So it is in JRuby but not in your APK,
+and the app dies on launch with `cannot load such file -- bigdecimal`.  Vendor
+it like any other gem:
+
+```shell
+gem fetch bigdecimal && gem unpack bigdecimal-*.gem
+cp -r bigdecimal-*/lib/* todo/app/src/main/resources/
+```
+
+## Sample: an IRB console
+
+[`assets/samples/irb_activity.rb`](assets/samples/irb_activity.rb) is a REPL you
+can carry around.  Type Ruby, get a value back; the binding persists between
+lines and anything the line prints is captured and shown.
+
+```shell
+ruby -Iruboto/lib ruboto/bin/ruboto gen app --package org.ruboto.irb --name Irb --path irb
+cp ruboto/assets/samples/irb_activity.rb irb/app/src/main/resources/irb_activity.rb
+cd irb && gradle assembleDebug && adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+It installs gems too — `gem install humanize` at the prompt downloads the
+`.gem`, unpacks its `lib` into the app's private storage and puts it on
+`$LOAD_PATH`, so it survives restarts.  RubyGems is never involved, which is
+what makes it possible here at all.  Dependencies are not resolved: if a
+`require` fails, install what it names the same way.  That needs one line added
+to `app/src/main/AndroidManifest.xml`, above `<application>`:
+
+```xml
+<uses-permission android:name="android.permission.INTERNET"/>
+```
+
+### On Wear OS
+
+[`assets/samples/wear_irb_activity.rb`](assets/samples/wear_irb_activity.rb) is
+the same idea sized for a watch: the crown scrolls the transcript, `clear`
+empties it, and there is a dictation button because typing Ruby on a watch is
+miserable.  It does not install gems.
+
+Generate it the same way, then make it a watch app by adding to
+`app/src/main/AndroidManifest.xml` — inside `<manifest>`:
+
+```xml
+<uses-feature android:name="android.hardware.type.watch"/>
+<queries><intent><action android:name="android.speech.RecognitionService"/></intent></queries>
+```
+
+and inside `<application>`, which also wants
+`android:theme="@android:style/Theme.DeviceDefault"` and
+`android:enableOnBackInvokedCallback="true"`:
+
+```xml
+<meta-data android:name="com.google.android.wearable.standalone" android:value="true"/>
+<uses-library android:name="com.google.android.wearable" android:required="false"/>
+```
+
+Expect a slow first start.  JRuby's runtime initialisation is around twenty
+seconds on watch hardware before the script is even read; it happens on a
+background thread behind the splash, so it is a wait rather than a hang.
+
 ## Starting a new Ruboto project
 
 * Download and install [Android studio](https://developer.android.com/studio/).
