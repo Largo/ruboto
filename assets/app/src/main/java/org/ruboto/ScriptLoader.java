@@ -5,8 +5,44 @@ import android.content.Context;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ScriptLoader {
+    private static final Map<String, Boolean> methodCache = new ConcurrentHashMap<String, Boolean>();
+
+   /**
+    Return true if the Ruby class defines the given method.
+
+    The generated component classes ask this before forwarding any Android
+    callback.  Answering it means evaluating Ruby, and callbacks such as
+    onUserInteraction fire once per input event, so the uncached version put a
+    full parse of the predicate on the UI thread for every touch and every
+    rotary tick.  On a watch that is enough to miss the input dispatcher's 5
+    second deadline and be killed.
+
+    The answer only changes when a script is evaluated, so it is cached until
+    then; see clearMethodCache().
+    */
+    public static boolean hasRubyMethod(String rubyClassName, String methodName, boolean includeInherited) {
+        final String key = rubyClassName + (includeInherited ? "#all#" : "#own#") + methodName;
+        Boolean cached = methodCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        Boolean defined = (Boolean) JRubyAdapter.runScriptlet(rubyClassName
+                + ".instance_methods(" + includeInherited + ").any?{|m| m.to_sym == :" + methodName + "}");
+        methodCache.put(key, defined);
+        return defined;
+    }
+
+   /**
+    Drop the cached method lookups.  Called whenever a script is evaluated,
+    since that is the only thing that can change the answers.
+    */
+    public static void clearMethodCache() {
+        methodCache.clear();
+    }
+
    /**
     Return true if we are called from JRuby.
     */
@@ -71,6 +107,7 @@ public class ScriptLoader {
             }, "ScriptLoader preload for " + rubyClassName, 128 * 1024);
             t.start();
             t.join();
+            clearMethodCache();
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             Log.e("Interrupted preloading script: " + ie);
@@ -137,6 +174,7 @@ public class ScriptLoader {
                             try {
                                 t.start();
                                 t.join();
+                                clearMethodCache();
                             } catch(InterruptedException ie) {
                                 Thread.currentThread().interrupt();
                                 throw new RuntimeException("Interrupted loading script.", ie);
