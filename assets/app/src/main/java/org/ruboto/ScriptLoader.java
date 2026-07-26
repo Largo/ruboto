@@ -21,6 +21,64 @@ public class ScriptLoader {
         return false;
     }
 
+   /**
+    Define the Ruby class backing the given Activity ahead of time.
+
+    Called from SplashActivity while the splash is up, so the script is evaluated
+    there instead of in the Activity's onCreate.  loadScript() joins the script
+    thread on whatever thread called it; when that is the UI thread, evaluating a
+    script of any size starves the window focus handoff of its 5 second deadline
+    and the app is killed with an ANR before it can draw.  Once the class is
+    defined here, loadScript() finds it and returns without evaluating anything.
+
+    Failures are logged and swallowed: loadScript() still runs afterwards and
+    remains the authority on reporting a broken script.
+    */
+    public static void preloadScript(String javaClassName) {
+        try {
+            final Class<?> javaClass = Class.forName(javaClassName);
+            final String rubyClassName = javaClass.getSimpleName();
+            if (JRubyAdapter.get(rubyClassName) != null) {
+                Log.d("Ruby class already defined: " + rubyClassName);
+                return;
+            }
+            final Script rubyScript = new Script(Script.toSnakeCase(rubyClassName) + ".rb");
+            if (!rubyScript.exists()) {
+                Log.d("No script to preload for: " + rubyClassName);
+                return;
+            }
+            final String script = rubyScript.getContents();
+            if (!script.matches("(?s).*class\\s+" + rubyClassName + ".*")) {
+                Log.d("Script does not define " + rubyClassName + ", leaving it to loadScript");
+                return;
+            }
+            Log.d("Preloading script: " + rubyScript.getName());
+
+            // Same handshake loadScript() performs, so it recognises the class as
+            // the Java proxy and skips its own load.
+            Object rubyClass = JRubyAdapter.runScriptlet("Java::" + javaClassName);
+            JRubyAdapter.put("$" + rubyClassName, rubyClass);
+            JRubyAdapter.runScriptlet(rubyClassName + " = $" + rubyClassName);
+
+            // Evaluated on its own thread to keep the stack size loadScript uses.
+            Thread t = new Thread(null, new Runnable() {
+                public void run() {
+                    long loadStart = System.currentTimeMillis();
+                    JRubyAdapter.setScriptFilename(rubyScript.getAbsolutePath());
+                    JRubyAdapter.runScriptlet(script);
+                    Log.d("Preload took " + (System.currentTimeMillis() - loadStart) + "ms");
+                }
+            }, "ScriptLoader preload for " + rubyClassName, 128 * 1024);
+            t.start();
+            t.join();
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            Log.e("Interrupted preloading script: " + ie);
+        } catch (Throwable t) {
+            Log.e("Failed to preload script: " + t);
+        }
+    }
+
     public static void loadScript(final RubotoComponent component) {
         try {
             if (component.getScriptInfo().getScriptName() != null) {
