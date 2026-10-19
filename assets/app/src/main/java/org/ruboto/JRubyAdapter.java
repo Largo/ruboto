@@ -2,21 +2,30 @@ package org.ruboto;
 
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
 
+import org.jruby.Ruby;
+import org.jruby.RubyArray;
+import org.jruby.RubyHash;
+import org.jruby.RubyModule;
+import org.jruby.RubyString;
 import org.jruby.embed.LocalContextScope;
 import org.jruby.embed.LocalVariableBehavior;
+import org.jruby.exceptions.RaiseException;
+import org.jruby.javasupport.JavaUtil;
+import org.jruby.runtime.ThreadContext;
+import org.jruby.runtime.builtin.IRubyObject;
 
 import java.io.File;
 import java.io.PrintStream;
 
 public class JRubyAdapter {
-    private static org.jruby.embed.ScriptingContainer ruby;
-    private static boolean isDebugBuild = false;
-    private static PrintStream output = null;
-    private static boolean initialized = false;
+    // Set up on the splash thread and read on the UI thread, so volatile;
+    // initialized is written last.
+    private static volatile org.jruby.embed.ScriptingContainer ruby;
+    private static volatile Ruby runtime;
+    private static volatile boolean isDebugBuild = false;
+    private static volatile PrintStream output = null;
+    private static volatile boolean initialized = false;
     private static LocalContextScope localContextScope = LocalContextScope.SINGLETON; // FIXME(uwe):  Why not CONCURRENT ?  Help needed!
     private static LocalVariableBehavior localVariableBehavior = LocalVariableBehavior.TRANSIENT;
 
@@ -26,6 +35,13 @@ public class JRubyAdapter {
 
     public static String getScriptFilename() {
         return ruby.getScriptFilename();
+    }
+
+   /**
+    The runtime behind the container, for lookups that need not evaluate Ruby.
+    */
+    public static Ruby getRuntime() {
+        return runtime;
     }
 
     public static Object runRubyMethod(Object receiver, String methodName, Object... args) {
@@ -57,32 +73,24 @@ public class JRubyAdapter {
         return setUpJRuby(appContext, output == null ? System.out : output);
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
     public static synchronized boolean setUpJRuby(Context appContext, PrintStream out) {
         if (!initialized) {
-            setDebugBuild(appContext);
-            Log.d("Setting up JRuby " + org.jruby.runtime.Constants.VERSION
-                    + " (" + (isDebugBuild ? "DEBUG" : "RELEASE") + ")"
-                    + "  Max memory: " + (Runtime.getRuntime().maxMemory() / (1024 * 1024)) + "MB");
-            setSystemProperties(appContext);
-
             try {
+                ApplicationInfo appInfo = appContext.getPackageManager()
+                        .getApplicationInfo(appContext.getPackageName(), 0);
+                isDebugBuild = (appInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+                final String apkName = appInfo.sourceDir;
+                Log.d("Setting up JRuby " + org.jruby.runtime.Constants.VERSION
+                        + " (" + (isDebugBuild ? "DEBUG" : "RELEASE") + ")"
+                        + "  Max memory: " + (Runtime.getRuntime().maxMemory() / (1024 * 1024)) + "MB");
+                setSystemProperties(appContext);
+
                 //////////////////////////////////
                 //
                 // Set jruby.home
                 // This needs to be set before the ScriptingContainer is initialized
                 //
-                String apkName;
-                try {
-                    apkName = appContext.getPackageManager()
-                            .getApplicationInfo(appContext.getPackageName(), 0).sourceDir;
-                    final String jrubyHome = "jar:file:" + apkName + "!/META-INF/jruby.home";
-                    Log.i("Setting JRUBY_HOME: " + jrubyHome);
-                    System.setProperty("jruby.home", jrubyHome);
-                } catch (NameNotFoundException e) {
-                    e.printStackTrace();
-                    throw new RuntimeException("Exception setting JRUBY_HOME", e);
-                }
+                System.setProperty("jruby.home", "jar:file:" + apkName + "!/META-INF/jruby.home");
 
                 //////////////////////////////////
                 //
@@ -102,8 +110,9 @@ public class JRubyAdapter {
                 // Bundled gems are loaded via the load path instead.
                 org.jruby.RubyInstanceConfig config = new org.jruby.RubyInstanceConfig();
                 config.setDisableGems(true);
-                if (appContext.getFilesDir() != null) {
-                    config.setCurrentDirectory(appContext.getFilesDir().getPath());
+                final File filesDir = appContext.getFilesDir();
+                if (filesDir != null) {
+                    config.setCurrentDirectory(filesDir.getPath());
                 }
 
                 ClassLoader classLoader = JRubyAdapter.class.getClassLoader();
@@ -115,7 +124,7 @@ public class JRubyAdapter {
                 }
 
                 // This will become the global runtime and be used by our ScriptingContainer
-                org.jruby.Ruby.newInstance(config);
+                runtime = Ruby.newInstance(config);
 
                 //////////////////////////////////
                 //
@@ -129,35 +138,44 @@ public class JRubyAdapter {
                 Thread.currentThread().setContextClassLoader(classLoader);
 
                 String scriptsDir = scriptsDirName(appContext);
-                addLoadPath(scriptsDir);
-                addLoadPath("jar:file:" + apkName + "!/");
-                addLoadPath("uri:classloader:/");
-                if (appContext.getFilesDir() != null) {
-                    String defaultCurrentDir = appContext.getFilesDir().getPath();
-                    Log.d("Setting JRuby current directory to " + defaultCurrentDir);
-                    ruby.setCurrentDirectory(defaultCurrentDir);
+                setUpLoadPath(apkName, scriptsDir);
+                if (filesDir != null) {
+                    ruby.setCurrentDirectory(filesDir.getPath());
                 } else {
                     Log.e("Unable to find app files dir!");
                     if (new File(scriptsDir).exists()) {
-                        Log.d("Changing JRuby current directory to " + scriptsDir);
                         ruby.setCurrentDirectory(scriptsDir);
                     }
                 }
 
-                put("$package_name", appContext.getPackageName());
-                put("APK_PATH", "jar:file:" + apkName + "!");
+                // Set through the Java API: these used to be scriptlets, each
+                // parsed and interpreted on the start-up path.
+                ThreadContext context = runtime.getCurrentContext();
+                RubyModule object = runtime.getObject();
+                IRubyObject app = JavaUtil.convertJavaToUsableRubyObject(runtime, appContext.getApplicationContext());
+                runtime.getGlobalVariables().set("$package_name", runtime.newString(appContext.getPackageName()));
+                object.setConstant(context, "APK_PATH", runtime.newString("jar:file:" + apkName + "!"));
+                object.setConstant(context, "RUBOTO_JAVA_PROXIES", RubyHash.newHash(runtime));
+                object.setConstant(context, "APPLICATION_CONTEXT", app);
+                runtime.getGlobalVariables().set("$application_context", app);
 
-                runScriptlet("::RUBOTO_JAVA_PROXIES = {}");
-
-                // TODO(uwe):  Add a way to display startup progress.
-                put("APPLICATION_CONTEXT", appContext.getApplicationContext());
-                put("$application_context", appContext.getApplicationContext());
-                runScriptlet("begin\n  require 'environment'\nrescue LoadError => e\n  puts e\nend");
+                // Without an environment.rb the require only raises a LoadError,
+                // after searching the whole load path and indexing the APK.
+                if (new Script("environment.rb").exists()) {
+                    try {
+                        runtime.getLoadService().require("environment");
+                    } catch (RaiseException e) {
+                        if (!runtime.getLoadError().isInstance(e.getException())) {
+                            throw e;
+                        }
+                        Log.e("Loading environment.rb failed: " + e.getMessage());
+                    }
+                }
 
                 initialized = true;
-            } catch (IllegalArgumentException e) {
-                handleInitException(e);
-            } catch (SecurityException e) {
+            } catch (Throwable e) {
+                // Anything thrown here would otherwise end the start-up thread and
+                // take the process down under the splash.
                 handleInitException(e);
             }
         }
@@ -204,15 +222,58 @@ public class JRubyAdapter {
         ruby.setScriptFilename(name);
     }
 
-    public static Boolean addLoadPath(String scriptsDir) {
-        if (new File(scriptsDir).exists() || scriptsDir.equals("uri:classloader:/") || scriptsDir.endsWith("/base.apk!/")) {
-            Log.i("Added directory to load path: " + scriptsDir);
-            Script.addDir(scriptsDir);
-            runScriptlet("$:.unshift '" + scriptsDir + "' ; $:.uniq! ; p $:");
-            return true;
-        } else {
-            Log.i("Extra scripts dir not present: " + scriptsDir);
+   /**
+    Put the directory or URI first on the Ruby load path (and on the path
+    Ruboto looks up activity scripts in).  The `!/` and `uri:classloader:/`
+    forms are stored without the trailing slash: JRuby compares $: entries with
+    the paths of already-loaded features by prefix length, and with the slash
+    no require ever matches, so every repeated require searches again.
+    */
+    public static Boolean addLoadPath(String dir) {
+        boolean isUri = dir.startsWith("jar:") || dir.startsWith("uri:") || dir.startsWith("file:");
+        if (!isUri && !new File(dir).exists()) {
+            Log.i("Extra scripts dir not present: " + dir);
             return false;
+        }
+        if (isUri && (dir.endsWith(":/") || dir.endsWith("!/"))) {
+            dir = dir.substring(0, dir.length() - 1);
+        }
+        Log.i("Added directory to load path: " + dir);
+        Script.addDir(dir);
+        unshiftLoadPath(dir);
+        return true;
+    }
+
+    private static void unshiftLoadPath(String dir) {
+        ThreadContext context = runtime.getCurrentContext();
+        RubyArray loadPath = (RubyArray) runtime.getLoadService().getLoadPath();
+        RubyString entry = runtime.newString(dir);
+        loadPath.delete(context, entry, org.jruby.runtime.Block.NULL_BLOCK);
+        loadPath.unshift(context, entry);
+    }
+
+    private static void setUpLoadPath(String apkName, String scriptsDir) {
+        ThreadContext context = runtime.getCurrentContext();
+        RubyArray loadPath = (RubyArray) runtime.getLoadService().getLoadPath();
+        // JRuby's default $: has jruby.home's site_ruby, which is not packaged.
+        // A jar: entry that does not exist is taken for a relative file path,
+        // so every require would stat and canonicalise it under the cwd.
+        for (int i = loadPath.getLength() - 1; i >= 0; i--) {
+            if (loadPath.eltInternal(i).toString().endsWith("/site_ruby")) {
+                loadPath.delete_at(context, i);
+            }
+        }
+        // The APK root holds the app's scripts, ruboto/* and the bundled gems.
+        // No separate uri:classloader: entry: JRuby falls back to the class
+        // loader for anything not found on $:.
+        unshiftLoadPath("jar:file:" + apkName + "!");
+        // The scripts dir only has content when scripts were pushed to a
+        // development build; empty, it would only add a stat to every require.
+        Script.addDir(scriptsDir);
+        String[] scripts = new File(scriptsDir).list();
+        if (scripts != null && scripts.length > 0) {
+            Log.i("Added directory to load path: " + scriptsDir);
+            unshiftLoadPath(scriptsDir);
         }
     }
 
@@ -226,11 +287,10 @@ public class JRubyAdapter {
 
     // Private methods
 
-    private static void handleInitException(Exception e) {
-        Log.e("Exception starting JRuby");
-        Log.e(e.getMessage() != null ? e.getMessage() : e.getClass().getName());
-        e.printStackTrace();
+    private static void handleInitException(Throwable e) {
+        Log.e("Exception starting JRuby", e);
         ruby = null;
+        runtime = null;
     }
 
     private static String scriptsDirName(Context context) {
@@ -250,17 +310,6 @@ public class JRubyAdapter {
             scriptsDir = new File(context.getFilesDir(), "scripts");
         }
         return scriptsDir.getAbsolutePath();
-    }
-
-    private static void setDebugBuild(Context context) {
-        PackageManager pm = context.getPackageManager();
-        PackageInfo pi;
-        try {
-            pi = pm.getPackageInfo(context.getPackageName(), 0);
-            isDebugBuild = ((pi.applicationInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0);
-        } catch (NameNotFoundException e) {
-            isDebugBuild = false;
-        }
     }
 
     public static void setOutputStream(PrintStream out) {
