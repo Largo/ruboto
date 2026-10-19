@@ -2,6 +2,7 @@ package org.ruboto;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -11,6 +12,8 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 
 
 public class SplashActivity extends Activity {
@@ -30,6 +33,9 @@ public class SplashActivity extends Activity {
         current = this;
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         super.onCreate(bundle);
+        if (Build.VERSION.SDK_INT >= 33) {
+            BackCallback.register(this);
+        }
         if (!JRubyAdapter.isInitialized()) {
             initJRuby(true);
         }
@@ -79,14 +85,40 @@ public class SplashActivity extends Activity {
         if (current == this) {
             current = null;
         }
+        // Finished some other way before the user Activity was started (back
+        // that reached neither handler below): do not start it any more.  Not
+        // when recreated for a configuration change, the start-up thread then
+        // still has to start it.
+        if (isFinishing() && !userActivityStarted) {
+            cancelled = true;
+        }
         super.onDestroy();
     }
 
     // Back while JRuby is starting leaves the app.  The start-up thread keeps
     // running, but no longer starts the user Activity.
     public void onBackPressed() {
+        cancelStartUp();
+    }
+
+    private void cancelStartUp() {
         cancelled = true;
         finishAndRemoveTask();
+    }
+
+    // Apps targeting API 36 get predictive back on Android 16+, where
+    // onBackPressed() is no longer called.  Below that, or without the opt-in,
+    // the platform ignores the callback and calls onBackPressed() as before.
+    // A class of its own so that the API 33 types are only resolved there.
+    private static final class BackCallback {
+        static void register(final SplashActivity splash) {
+            splash.getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, new OnBackInvokedCallback() {
+                        public void onBackInvoked() {
+                            splash.cancelStartUp();
+                        }
+                    });
+        }
     }
 
     private void initJRuby(final boolean firstTime) {
