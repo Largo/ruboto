@@ -122,11 +122,20 @@ module Ruboto
   end
 end
 
-def ruboto_configure_activity(klass)
-  klass.class_eval do
-    include Ruboto::Activity
+# Private like a top-level method, but included into Object once (see the
+# note in ruboto/widget.rb).
+module Ruboto
+  module ActivityFunctions
+    private
+
+    def ruboto_configure_activity(klass)
+      klass.class_eval do
+        include Ruboto::Activity
+      end
+    end
   end
 end
+Object.send(:include, Ruboto::ActivityFunctions)
 
 java_import 'android.app.Activity'
 java_import 'org.ruboto.RubotoActivity'
