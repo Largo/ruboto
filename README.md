@@ -24,11 +24,17 @@ ruby -Iruboto/lib ruboto/bin/ruboto gen app --package org.ruboto.todo --name Tod
 cp ruboto/assets/samples/todo_activity.rb todo/app/src/main/resources/todo_activity.rb
 
 # 4. Build the APK
-cd todo && gradle assembleDebug
+cd todo && gradle assembleBenchmark
 
 # 5. Install it on your phone (enable USB debugging first)
-adb install app/build/outputs/apk/debug/app-debug.apk
+adb install app/build/outputs/apk/benchmark/app-benchmark.apk
 ```
+
+`benchmark` is a release build signed with the debug key, so it installs
+without setting up a keystore.  Use `gradle installBenchmark` to build and
+install in one go.  `assembleDebug` still works and is what you want for
+attaching a debugger, but a debuggable app starts about three times slower —
+see [Measuring start-up](#measuring-start-up).
 
 The whole app is one Ruby file: [`assets/samples/todo_activity.rb`](assets/samples/todo_activity.rb).
 Edit it, rebuild, reinstall — that is the entire development cycle.
@@ -133,6 +139,50 @@ because the generated `build.gradle` excludes
 `META-INF/jruby.home/lib/ruby/gems/` to keep it small; if `require` fails with
 `cannot load such file`, vendor the gem like any other.
 
+### Measuring start-up
+
+Judge start-up time on the `benchmark` build type, never on `app-debug.apk`.
+For an `android:debuggable` app ART turns off its fast interpreter and ignores
+compiled code, which makes JRuby's boot about three times slower than the same
+APK built non-debuggable.  `benchmark` is non-debuggable and `profileable`, so
+`simpleperf` and Perfetto can still sample it.
+
+Time a cold start from the command line:
+
+```shell
+adb shell am force-stop org.ruboto.todo && adb logcat -c
+adb shell am start -W -S -n org.ruboto.todo/.TodoActivity
+adb logcat -d -s ActivityTaskManager:I | grep 'Displayed org.ruboto.todo'
+```
+
+The launch activity finishes itself and shows a splash screen while JRuby
+starts, so the `TotalTime` that `am start -W` prints only reaches the splash.
+The time to the app's own screen is the second `Displayed
+org.ruboto.todo/.TodoActivity` line in logcat.  Repeat it a few times and take
+the median.
+
+Generated apps also ship a baseline profile
+(`app/src/main/baseline-prof.txt`, the JRuby methods and classes a Ruboto app
+runs while it starts) so that ART compiles JRuby's boot ahead of time; that
+takes roughly another 40% off a non-debuggable start.  Play installs it with
+the app.  After a plain `adb install` the first launches run without it until
+`androidx.profileinstaller` has handed it to ART and the device has compiled
+it in the background, so to measure the compiled state either install the
+profile along with the APK or compile right away:
+
+```shell
+# Android 12 and later (baselineProfiles/1/ is for Android 9 to 11)
+adb install-multiple app/build/outputs/apk/benchmark/app-benchmark.apk \
+    app/build/outputs/apk/benchmark/baselineProfiles/0/app-benchmark.dm
+# or after a plain adb install, once the app has run for a few seconds:
+adb shell cmd package compile -f -m speed-profile org.ruboto.todo
+```
+
+Add your own hot code to `baseline-prof.txt` if you like; the file in
+[`assets/app/src/main`](assets/app/src/main/baseline-prof.txt) is regenerated
+for each JRuby version with `rake baseline_profile` (see
+[`rakelib/baseline_profile.rake`](rakelib/baseline_profile.rake)).
+
 ## Sample: an IRB console
 
 [`assets/samples/irb_activity.rb`](assets/samples/irb_activity.rb) is a REPL you
@@ -142,7 +192,7 @@ lines and anything the line prints is captured and shown.
 ```shell
 ruby -Iruboto/lib ruboto/bin/ruboto gen app --package org.ruboto.irb --name Irb --path irb
 cp ruboto/assets/samples/irb_activity.rb irb/app/src/main/resources/irb_activity.rb
-cd irb && gradle assembleDebug && adb install app/build/outputs/apk/debug/app-debug.apk
+cd irb && gradle installBenchmark
 ```
 
 It installs gems too — `gem install humanize` at the prompt downloads the
