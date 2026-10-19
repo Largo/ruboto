@@ -7,6 +7,7 @@ import java.util.stream.Stream;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
@@ -22,6 +23,10 @@ import org.objectweb.asm.Type;
  *   ClassLoader.getUnnamedModule() becomes  POP; ACONST_NULL
  *   any other Module method pops its arguments and receiver and pushes
  *   null/false/0 (e.g. isNamed() is false, so addReads is skipped)
+ *   fields of type Module (Ruby.JRUBY_MODULE) become Object fields, because
+ *   ART cannot resolve their type: Class.getDeclaredFields() on such a
+ *   class throws NoClassDefFoundError, so a Java proxy for org.jruby.Ruby
+ *   (JRuby.runtime) could not be built
  *
  * Android's java.nio buffers lack the Java 9+ covariant overrides
  * (ByteBuffer.limit(int) returns Buffer, not ByteBuffer), and
@@ -47,6 +52,12 @@ import org.objectweb.asm.Type;
  *   returns null (Interface.impl {} NPE) or a self-delegating allocator
  *   (StackOverflowError for named classes that include an interface).
  *
+ * Pregenerated method binding: RubyModule.loadPopulatorFor:
+ * ClassLoader.getResource(String) becomes
+ * RubotoPopulators.getResource(ClassLoader, String), which looks for the
+ * org.jruby.gen.*$POPULATOR class instead of its .class resource (an APK has
+ * none), so core classes are bound by their populators, not by reflection.
+ *
  * All rewrites preserve the stack shape, so existing stack map frames
  * remain valid.
  */
@@ -57,6 +68,9 @@ public class JRuby10AndroidPatcher {
             "java/nio/FloatBuffer", "java/nio/DoubleBuffer", "java/nio/MappedByteBuffer");
     static final java.util.Set<String> BUFFER_METHODS = java.util.Set.of(
             "clear", "flip", "limit", "mark", "position", "reset", "rewind");
+    static final String MODULE_DESC = "Ljava/lang/Module;";
+    static final String OBJECT_DESC = "Ljava/lang/Object;";
+    static int populatorLookups = 0;
     public static void main(String[] args) throws IOException {
         Path root = Paths.get(args[0]);
         final int[] patched = {0};
@@ -70,6 +84,10 @@ public class JRuby10AndroidPatcher {
                     });
         }
         System.out.println("Patched " + patched[0] + " classes for Android");
+        if (populatorLookups != 1) {
+            System.out.println("WARNING: expected 1 populator lookup in RubyModule.loadPopulatorFor, patched "
+                    + populatorLookups + "; JRuby core classes will be bound by reflection (slower start-up)");
+        }
     }
 
     static boolean patch(Path path) {
@@ -81,12 +99,23 @@ public class JRuby10AndroidPatcher {
             final String className = reader.getClassName();
             reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
                 @Override
+                public FieldVisitor visitField(int access, String name, String desc, String sig, Object value) {
+                    if (desc.equals(MODULE_DESC)) {
+                        changed[0] = true;
+                        return super.visitField(access, name, OBJECT_DESC, sig, value);
+                    }
+                    return super.visitField(access, name, desc, sig, value);
+                }
+
+                @Override
                 public MethodVisitor visitMethod(int access, String name, String desc, String sig, String[] ex) {
                     MethodVisitor mv = super.visitMethod(access, name, desc, sig, ex);
                     final boolean procToJava = className.equals("org/jruby/RubyProc")
                             && name.equals("toJava") && desc.equals("(Ljava/lang/Class;)Ljava/lang/Object;");
                     final boolean interfaceImplMethods = className.equals("org/jruby/java/proxies/JavaInterfaceTemplate")
                             && name.equals("initInterfaceImplMethods");
+                    final boolean populatorLookup = className.equals("org/jruby/RubyModule")
+                            && name.equals("loadPopulatorFor");
                     return new MethodVisitor(Opcodes.ASM9, mv) {
                         @Override
                         public void visitMethodInsn(int op, String owner, String mName, String mDesc, boolean itf) {
@@ -96,6 +125,13 @@ public class JRuby10AndroidPatcher {
                                 super.visitMethodInsn(Opcodes.INVOKESTATIC,
                                         "org/jruby/java/proxies/RubotoInterfaceAllocator", "baseAllocator",
                                         "(Lorg/jruby/RubyClass;)Lorg/jruby/runtime/ObjectAllocator;", false);
+                                changed[0] = true;
+                            } else if (populatorLookup && op == Opcodes.INVOKEVIRTUAL
+                                    && owner.equals("java/lang/ClassLoader") && mName.equals("getResource")
+                                    && mDesc.equals("(Ljava/lang/String;)Ljava/net/URL;")) {
+                                super.visitMethodInsn(Opcodes.INVOKESTATIC, "org/jruby/RubotoPopulators", "getResource",
+                                        "(Ljava/lang/ClassLoader;Ljava/lang/String;)Ljava/net/URL;", false);
+                                populatorLookups++;
                                 changed[0] = true;
                             } else if (owner.equals("java/lang/Class") && mName.equals("getModule")
                                     && mDesc.equals("()Ljava/lang/Module;")) {
@@ -155,6 +191,9 @@ public class JRuby10AndroidPatcher {
                             if (procToJava && op == Opcodes.GETSTATIC
                                     && owner.equals("org/jruby/runtime/Block$Type") && fName.equals("JAVA")) {
                                 super.visitInsn(Opcodes.ACONST_NULL);
+                                changed[0] = true;
+                            } else if (fDesc.equals(MODULE_DESC)) {
+                                super.visitFieldInsn(op, owner, fName, OBJECT_DESC);
                                 changed[0] = true;
                             } else if (op == Opcodes.GETSTATIC && owner.equals("com/sun/nio/file/ExtendedOpenOption")) {
                                 super.visitInsn(Opcodes.ACONST_NULL);
