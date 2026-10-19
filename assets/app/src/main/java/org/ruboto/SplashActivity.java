@@ -1,22 +1,23 @@
 package org.ruboto;
 
 import android.app.Activity;
-import android.app.ProgressDialog;
-import android.content.DialogInterface;
-import android.content.DialogInterface.OnCancelListener;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.view.Gravity;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 
 public class SplashActivity extends Activity {
     private int splash = 0;
-    private ProgressDialog loadingDialog;
-    private boolean dialogCancelled = false;
+    private TextView progressText;
+    // Set on the UI thread, read on the JRuby start-up thread.
+    private volatile boolean cancelled = false;
     // Set on the JRuby start-up thread, read on the UI thread.
     private volatile boolean userActivityStarted = false;
     private static SplashActivity current;
@@ -25,17 +26,13 @@ public class SplashActivity extends Activity {
 
     public void onCreate(Bundle bundle) {
         Log.d("SplashActivity onCreate:");
-        try {
-            splash = Class.forName(getPackageName() + ".R$layout").getField("splash").getInt(null);
-        } catch (Exception e) {
-            splash = -1;
-        }
+        splash = getResources().getIdentifier("splash", "layout", getPackageName());
         current = this;
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        super.onCreate(bundle);
         if (!JRubyAdapter.isInitialized()) {
             initJRuby(true);
         }
-        super.onCreate(bundle);
     }
 
     public void onResume() {
@@ -83,12 +80,13 @@ public class SplashActivity extends Activity {
             current = null;
         }
         super.onDestroy();
-        if (dialogCancelled) {
-            System.runFinalizersOnExit(true);
-            System.exit(0);
-        } else {
-            hideProgress();
-        }
+    }
+
+    // Back while JRuby is starting leaves the app.  The start-up thread keeps
+    // running, but no longer starts the user Activity.
+    public void onBackPressed() {
+        cancelled = true;
+        finishAndRemoveTask();
     }
 
     private void initJRuby(final boolean firstTime) {
@@ -96,6 +94,9 @@ public class SplashActivity extends Activity {
         new Thread(new Runnable() {
             public void run() {
                 final boolean jrubyOk = JRubyAdapter.setUpJRuby(SplashActivity.this);
+                if (cancelled) {
+                    return;
+                }
                 if (jrubyOk) {
                     Log.d("SplashActivity onResume: JRuby OK");
                     preloadUserActivityScript();
@@ -104,12 +105,11 @@ public class SplashActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         public void run() {
                             Toast.makeText(SplashActivity.this, "Failed to initialize Ruboto Core.", Toast.LENGTH_LONG).show();
-                            try {
-                                TextView textView = (TextView) findViewById(android.R.id.text1);
+                            TextView textView = progressText != null ? progressText
+                                    : (TextView) findViewById(android.R.id.text1);
+                            if (textView != null) {
                                 textView.setText("Woops!  Ruboto failed to initialize properly!  I am not sure how to proceed from here.  If you can, please file an error report at http://ruboto.org/");
-                            } catch (Exception e) {
                             }
-                            hideProgress();
                         }
                     });
                 }
@@ -118,29 +118,22 @@ public class SplashActivity extends Activity {
     }
 
     private void showProgress() {
-        if (loadingDialog == null) {
-            if (splash > 0) {
-                Log.i("SplashActivity Showing splash");
-                setContentView(splash);
-            } else {
-                Log.i("SplashActivity Showing progress");
-                loadingDialog = ProgressDialog.show(this, null, "Starting...", true, true);
-                loadingDialog.setCanceledOnTouchOutside(false);
-                loadingDialog.setOnCancelListener(new OnCancelListener() {
-                    public void onCancel(DialogInterface dialog) {
-                        dialogCancelled = true;
-                        finish();
-                    }
-                });
-            }
-        }
-    }
-
-    private void hideProgress() {
-        if (loadingDialog != null) {
-            Log.d("SplashActivity Hide progress");
-            loadingDialog.dismiss();
-            loadingDialog = null;
+        if (splash > 0) {
+            Log.i("SplashActivity Showing splash");
+            setContentView(splash);
+        } else {
+            // A plain spinner instead of the deprecated ProgressDialog, which
+            // also put a second window on screen during start-up.
+            Log.i("SplashActivity Showing progress");
+            LinearLayout layout = new LinearLayout(this);
+            layout.setOrientation(LinearLayout.VERTICAL);
+            layout.setGravity(Gravity.CENTER);
+            layout.addView(new ProgressBar(this));
+            progressText = new TextView(this);
+            progressText.setText("Starting...");
+            progressText.setGravity(Gravity.CENTER);
+            layout.addView(progressText);
+            setContentView(layout);
         }
     }
 
@@ -175,7 +168,7 @@ public class SplashActivity extends Activity {
     }
 
     private void startUserActivity() {
-        if (getIntent().hasExtra(Intent.EXTRA_INTENT)) {
+        if (!cancelled && getIntent().hasExtra(Intent.EXTRA_INTENT)) {
             userActivityStarted = true;
             startActivity((Intent)getIntent().getParcelableExtra(Intent.EXTRA_INTENT));
             // Last resort for targets that neither report back nor cover the
