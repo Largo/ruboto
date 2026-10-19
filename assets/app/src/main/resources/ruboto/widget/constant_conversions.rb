@@ -55,11 +55,11 @@ View.class_eval do
   # names.  Tries the upcased name in all sources first, like
   # ruboto/widget.rb, then lists the constants of the classes for names that
   # are not all upper case (:scaletype for ImageView::ScaleType) or that
-  # Object has as well.
+  # Object or its modules have as well.
   def self.find_constant_conversion(symbol)
     name = symbol.to_s
     constant_name = name.upcase
-    fast = name == name.downcase && constant_name.match?(/\A[A-Z]\w*\z/) && !Object.const_defined?(constant_name, false)
+    fast = name == name.downcase && constant_name.match?(/\A[A-Z]\w*\z/) && !Object.const_defined?(constant_name)
     constant_conversion_sources.reverse_each do |source|
       if source.is_a?(Hash)
         return true, source[symbol] if source.include?(symbol)

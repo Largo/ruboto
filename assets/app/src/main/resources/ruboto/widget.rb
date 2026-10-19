@@ -112,18 +112,28 @@ View.class_eval do
     @resolved_constant_conversions = nil
   end
 
+  # The cache is replaced, not changed in place: conversions also run off the
+  # UI thread, and concurrent writes to a JRuby Hash can raise
+  # ConcurrencyError.  Copied with "each": the first Hash#dup or #merge
+  # costs about 30 M instructions under -Xint.
   def self.convert_constant(from)
     return from unless from.is_a?(Symbol)
-    cache = (@resolved_constant_conversions ||= {})
-    cache.fetch(from) { cache[from] = resolve_constant_conversion(from) }
+    cache = @resolved_constant_conversions
+    return cache[from] if cache&.include?(from)
+    value = resolve_constant_conversion(from)
+    new_cache = {}
+    cache&.each { |k, v| new_cache[k] = v }
+    new_cache[from] = value
+    @resolved_constant_conversions = new_cache
+    value
   end
 
-  # const_defined? also sees Object's constants, which Module#constants
-  # leaves out, so those names take the slow path.
+  # const_defined? also sees the constants of Object and its modules, which
+  # Module#constants leaves out, so those names take the slow path.
   def self.resolve_constant_conversion(symbol)
     name = symbol.to_s
     constant_name = name.upcase
-    if name == name.downcase && constant_name.match?(/\A[A-Z]\w*\z/) && !Object.const_defined?(constant_name, false)
+    if name == name.downcase && constant_name.match?(/\A[A-Z]\w*\z/) && !Object.const_defined?(constant_name)
       constant_conversion_sources.reverse_each do |klass, own_only|
         if klass.const_defined?(constant_name) && !(own_only && klass.superclass.const_defined?(constant_name))
           return klass.const_get(constant_name)
@@ -230,6 +240,9 @@ module Ruboto
 
     # Widget methods waiting for the android.app.Fragment proxy: method name => widget class
     PENDING_FRAGMENT_WIDGETS = {}
+    # All fragment widget method names, pending or defined: name => true
+    FRAGMENT_WIDGET_NAMES = {}
+    FRAGMENT_WIDGETS_LOCK = Mutex.new
 
     # android.app.Fragment gets the widget methods as well, but building its
     # proxy costs about 100 M instructions under -Xint (a big class, and its
@@ -239,7 +252,10 @@ module Ruboto
     # subclass needs the Fragment proxy), or at the first call of a widget
     # method on a fragment that is only known to Ruby as a Java object.
     def self.define_fragment_widget_method(method_name, widget_class)
-      PENDING_FRAGMENT_WIDGETS[method_name.to_sym] = widget_class
+      FRAGMENT_WIDGETS_LOCK.synchronize do
+        PENDING_FRAGMENT_WIDGETS[method_name.to_sym] = widget_class
+        FRAGMENT_WIDGET_NAMES[method_name.to_sym] = true
+      end
       define_fragment_widget_methods if fragment_proxy_created?
     end
 
@@ -248,10 +264,15 @@ module Ruboto
       Java::AndroidApp.const_defined?(:Fragment, false)
     end
 
+    # The first fragment can show up on another thread than the imports, and
+    # concurrent define_method calls on one JRuby class can corrupt its
+    # method table, hence the lock.
     def self.define_fragment_widget_methods
-      until PENDING_FRAGMENT_WIDGETS.empty?
-        method_name, widget_class = PENDING_FRAGMENT_WIDGETS.shift
-        define_widget_method(Java::AndroidApp::Fragment, method_name, widget_class, true)
+      FRAGMENT_WIDGETS_LOCK.synchronize do
+        PENDING_FRAGMENT_WIDGETS.keys.each do |method_name|
+          define_widget_method(Java::AndroidApp::Fragment, method_name, PENDING_FRAGMENT_WIDGETS[method_name], true)
+          PENDING_FRAGMENT_WIDGETS.delete(method_name)
+        end
       end
     end
 
@@ -275,8 +296,7 @@ module Ruboto
     # method_defined? or instance_methods.
     module FragmentMethodMissing
       def method_missing(method, *args, &block)
-        if Ruboto::Widget.pending_fragment_method?(self, method)
-          Ruboto::Widget.define_fragment_widget_methods
+        if Ruboto::Widget.fragment_widget_method?(self, method)
           return __send__(method, *args, &block)
         end
         super
@@ -284,9 +304,15 @@ module Ruboto
     end
     Java::JavaLang::Object.send(:include, FragmentMethodMissing)
 
-    def self.pending_fragment_method?(object, method)
-      PENDING_FRAGMENT_WIDGETS.include?(method.to_sym) && fragment_proxy_created? &&
+    # Defines the pending methods for a fragment.  Also true when another
+    # thread defined the method after this call missed it.  Checking the
+    # public method of the class keeps a method undefined in a subclass from
+    # looping through method_missing.
+    def self.fragment_widget_method?(object, method)
+      return false unless FRAGMENT_WIDGET_NAMES.include?(method.to_sym) && fragment_proxy_created? &&
           object.is_a?(Java::AndroidApp::Fragment)
+      define_fragment_widget_methods unless PENDING_FRAGMENT_WIDGETS.empty?
+      object.class.public_method_defined?(method)
     end
   end
 end
