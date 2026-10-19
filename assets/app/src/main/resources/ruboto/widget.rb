@@ -195,6 +195,67 @@ module Ruboto
         rv
       end
     end
+
+    # Widget methods waiting for the android.app.Fragment proxy: method name => widget class
+    PENDING_FRAGMENT_WIDGETS = {}
+
+    # android.app.Fragment gets the widget methods as well, but building its
+    # proxy costs about 100 M instructions under -Xint (a big class, and its
+    # Java superclasses and interfaces) and most apps never use platform
+    # fragments.  So the methods are added once the proxy exists: right away
+    # if it already does, else when Ruby subclasses a Java class (a Fragment
+    # subclass needs the Fragment proxy), or at the first call of a widget
+    # method on a fragment that is only known to Ruby as a Java object.
+    def self.define_fragment_widget_method(method_name, widget_class)
+      PENDING_FRAGMENT_WIDGETS[method_name.to_sym] = widget_class
+      define_fragment_widget_methods if fragment_proxy_created?
+    end
+
+    # Proxy classes are registered in their package module when they are built.
+    def self.fragment_proxy_created?
+      Java::AndroidApp.const_defined?(:Fragment, false)
+    end
+
+    def self.define_fragment_widget_methods
+      until PENDING_FRAGMENT_WIDGETS.empty?
+        method_name, widget_class = PENDING_FRAGMENT_WIDGETS.shift
+        define_widget_method(Java::AndroidApp::Fragment, method_name, widget_class, true)
+      end
+    end
+
+    # Prepended to the singleton class of java.lang.Object: JRuby defines its
+    # own "inherited" there, which must still run.
+    module FragmentInheritedHook
+      def inherited(subclass)
+        unless PENDING_FRAGMENT_WIDGETS.empty?
+          Ruboto::Widget.define_fragment_widget_methods if Ruboto::Widget.fragment_proxy_created?
+        end
+        super
+      end
+    end
+    Java::JavaLang::Object.singleton_class.prepend FragmentInheritedHook
+
+    # Included into java.lang.Object, for fragments created by Java code.
+    # There is deliberately no respond_to_missing?: it would run on every
+    # failed respond_to? of every Java object, and set_attribute makes many
+    # (7x slower misses under -Xint).  So until the methods are defined,
+    # such a fragment does not report them through respond_to?,
+    # method_defined? or instance_methods.
+    module FragmentMethodMissing
+      def method_missing(method, *args, &block)
+        if Ruboto::Widget.pending_fragment_method?(self, method)
+          Ruboto::Widget.define_fragment_widget_methods
+          return __send__(method, *args, &block)
+        end
+        super
+      end
+    end
+    Java::JavaLang::Object.send(:include, FragmentMethodMissing)
+
+    def self.pending_fragment_method?(object, method)
+      PENDING_FRAGMENT_WIDGETS.include?(method.to_sym) && fragment_proxy_created? &&
+          object.is_a?(Java::AndroidApp::Fragment)
+    end
   end
 end
 
@@ -220,12 +281,7 @@ module Ruboto
       widget_class = klass.is_a?(Array) ? klass.first : klass # java_import returns the list of imported classes
       method_name = class_name.to_s.gsub(/([A-Z])/) { '_' + $1.downcase }[1..-1]
       Ruboto::Widget.define_widget_method(RubotoActivity, method_name, widget_class)
-
-      # FIXME(uwe): Remove condition when we stop support for api level < 11
-      if android.os.Build::VERSION::SDK_INT >= 11
-        Ruboto::Widget.define_widget_method(android.app.Fragment, method_name, widget_class, true)
-      end
-      # EMXIF
+      Ruboto::Widget.define_fragment_widget_method(method_name, widget_class)
 
       setup_list_view if class_name == :ListView
       setup_spinner if class_name == :Spinner
