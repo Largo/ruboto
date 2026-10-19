@@ -944,7 +944,9 @@ module Ruboto
       #   bytecode generation (both unavailable on ART) with Android-safe
       #   implementations from lib/jruby10_overrides.
       # - Rewrites Class.getModule()/Module.canRead() calls (java.lang.Module
-      #   does not exist on ART) via an ASM-based bytecode patcher.
+      #   does not exist on ART) via an ASM-based bytecode patcher, which also
+      #   makes RubyModule find the pregenerated populators in the dex (see
+      #   RubotoPopulators.java).
       # - Backports JDK APIs newer than the device and, below
       #   NATIVE_INVOKE_SDK_LEVEL, moves java.lang.invoke onto the stand-in in
       #   lib/jruby10_legacy (see backport_jruby_core).
@@ -979,7 +981,7 @@ module Ruboto
         `javac -cp . -d . #{override_sources.join(' ')}`
         raise 'Compiling Android overrides failed' unless $? == 0
 
-        print 'Patching java.lang.Module usage...'
+        print 'Patching java.lang.Module usage and the populator lookup...'
         puts `java -cp #{asm_jar}#{File::PATH_SEPARATOR}#{tool_dir} JRuby10AndroidPatcher .`
         raise 'Patching classes for Android failed' unless $? == 0
         FileUtils.rm_rf tool_dir

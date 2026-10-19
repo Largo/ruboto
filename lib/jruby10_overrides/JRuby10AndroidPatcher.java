@@ -47,6 +47,12 @@ import org.objectweb.asm.Type;
  *   returns null (Interface.impl {} NPE) or a self-delegating allocator
  *   (StackOverflowError for named classes that include an interface).
  *
+ * Pregenerated method binding: RubyModule.loadPopulatorFor:
+ * ClassLoader.getResource(String) becomes
+ * RubotoPopulators.getResource(ClassLoader, String), which looks for the
+ * org.jruby.gen.*$POPULATOR class instead of its .class resource (an APK has
+ * none), so core classes are bound by their populators, not by reflection.
+ *
  * All rewrites preserve the stack shape, so existing stack map frames
  * remain valid.
  */
@@ -57,6 +63,7 @@ public class JRuby10AndroidPatcher {
             "java/nio/FloatBuffer", "java/nio/DoubleBuffer", "java/nio/MappedByteBuffer");
     static final java.util.Set<String> BUFFER_METHODS = java.util.Set.of(
             "clear", "flip", "limit", "mark", "position", "reset", "rewind");
+    static int populatorLookups = 0;
     public static void main(String[] args) throws IOException {
         Path root = Paths.get(args[0]);
         final int[] patched = {0};
@@ -70,6 +77,10 @@ public class JRuby10AndroidPatcher {
                     });
         }
         System.out.println("Patched " + patched[0] + " classes for Android");
+        if (populatorLookups != 1) {
+            System.out.println("WARNING: expected 1 populator lookup in RubyModule.loadPopulatorFor, patched "
+                    + populatorLookups + "; JRuby core classes will be bound by reflection (slower start-up)");
+        }
     }
 
     static boolean patch(Path path) {
@@ -87,6 +98,8 @@ public class JRuby10AndroidPatcher {
                             && name.equals("toJava") && desc.equals("(Ljava/lang/Class;)Ljava/lang/Object;");
                     final boolean interfaceImplMethods = className.equals("org/jruby/java/proxies/JavaInterfaceTemplate")
                             && name.equals("initInterfaceImplMethods");
+                    final boolean populatorLookup = className.equals("org/jruby/RubyModule")
+                            && name.equals("loadPopulatorFor");
                     return new MethodVisitor(Opcodes.ASM9, mv) {
                         @Override
                         public void visitMethodInsn(int op, String owner, String mName, String mDesc, boolean itf) {
@@ -96,6 +109,13 @@ public class JRuby10AndroidPatcher {
                                 super.visitMethodInsn(Opcodes.INVOKESTATIC,
                                         "org/jruby/java/proxies/RubotoInterfaceAllocator", "baseAllocator",
                                         "(Lorg/jruby/RubyClass;)Lorg/jruby/runtime/ObjectAllocator;", false);
+                                changed[0] = true;
+                            } else if (populatorLookup && op == Opcodes.INVOKEVIRTUAL
+                                    && owner.equals("java/lang/ClassLoader") && mName.equals("getResource")
+                                    && mDesc.equals("(Ljava/lang/String;)Ljava/net/URL;")) {
+                                super.visitMethodInsn(Opcodes.INVOKESTATIC, "org/jruby/RubotoPopulators", "getResource",
+                                        "(Ljava/lang/ClassLoader;Ljava/lang/String;)Ljava/net/URL;", false);
+                                populatorLookups++;
                                 changed[0] = true;
                             } else if (owner.equals("java/lang/Class") && mName.equals("getModule")
                                     && mDesc.equals("()Ljava/lang/Module;")) {
