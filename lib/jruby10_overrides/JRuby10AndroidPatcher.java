@@ -7,6 +7,7 @@ import java.util.stream.Stream;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
@@ -22,6 +23,10 @@ import org.objectweb.asm.Type;
  *   ClassLoader.getUnnamedModule() becomes  POP; ACONST_NULL
  *   any other Module method pops its arguments and receiver and pushes
  *   null/false/0 (e.g. isNamed() is false, so addReads is skipped)
+ *   fields of type Module (Ruby.JRUBY_MODULE) become Object fields, because
+ *   ART cannot resolve their type: Class.getDeclaredFields() on such a
+ *   class throws NoClassDefFoundError, so a Java proxy for org.jruby.Ruby
+ *   (JRuby.runtime) could not be built
  *
  * Android's java.nio buffers lack the Java 9+ covariant overrides
  * (ByteBuffer.limit(int) returns Buffer, not ByteBuffer), and
@@ -63,6 +68,8 @@ public class JRuby10AndroidPatcher {
             "java/nio/FloatBuffer", "java/nio/DoubleBuffer", "java/nio/MappedByteBuffer");
     static final java.util.Set<String> BUFFER_METHODS = java.util.Set.of(
             "clear", "flip", "limit", "mark", "position", "reset", "rewind");
+    static final String MODULE_DESC = "Ljava/lang/Module;";
+    static final String OBJECT_DESC = "Ljava/lang/Object;";
     static int populatorLookups = 0;
     public static void main(String[] args) throws IOException {
         Path root = Paths.get(args[0]);
@@ -91,6 +98,15 @@ public class JRuby10AndroidPatcher {
             ClassWriter writer = new ClassWriter(0);
             final String className = reader.getClassName();
             reader.accept(new ClassVisitor(Opcodes.ASM9, writer) {
+                @Override
+                public FieldVisitor visitField(int access, String name, String desc, String sig, Object value) {
+                    if (desc.equals(MODULE_DESC)) {
+                        changed[0] = true;
+                        return super.visitField(access, name, OBJECT_DESC, sig, value);
+                    }
+                    return super.visitField(access, name, desc, sig, value);
+                }
+
                 @Override
                 public MethodVisitor visitMethod(int access, String name, String desc, String sig, String[] ex) {
                     MethodVisitor mv = super.visitMethod(access, name, desc, sig, ex);
@@ -175,6 +191,9 @@ public class JRuby10AndroidPatcher {
                             if (procToJava && op == Opcodes.GETSTATIC
                                     && owner.equals("org/jruby/runtime/Block$Type") && fName.equals("JAVA")) {
                                 super.visitInsn(Opcodes.ACONST_NULL);
+                                changed[0] = true;
+                            } else if (fDesc.equals(MODULE_DESC)) {
+                                super.visitFieldInsn(op, owner, fName, OBJECT_DESC);
                                 changed[0] = true;
                             } else if (op == Opcodes.GETSTATIC && owner.equals("com/sun/nio/file/ExtendedOpenOption")) {
                                 super.visitInsn(Opcodes.ACONST_NULL);
