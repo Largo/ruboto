@@ -971,6 +971,7 @@ module Ruboto
       #   does not exist on ART) via an ASM-based bytecode patcher, which also
       #   makes RubyModule find the pregenerated populators in the dex (see
       #   RubotoPopulators.java).
+      # - Loads ProcessManager and Pathname lazily (replace_jruby_kernel_rb).
       # - Backports JDK APIs newer than the device and, below
       #   NATIVE_INVOKE_SDK_LEVEL, moves java.lang.invoke onto the stand-in in
       #   lib/jruby10_legacy (see backport_jruby_core).
@@ -1010,7 +1011,31 @@ module Ruboto
         raise 'Patching classes for Android failed' unless $? == 0
         FileUtils.rm_rf tool_dir
 
+        replace_jruby_kernel_rb("#{overrides_dir}/kernel.rb")
+
         backport_jruby_core(min_sdk_level.to_i < NATIVE_INVOKE_SDK_LEVEL)
+      end
+
+      # SHA-256 of the jruby/kernel.rb that lib/jruby10_overrides/kernel.rb is
+      # based on (JRuby 10.1.1.0).
+      JRUBY_KERNEL_RB_SHA256 = 'd50be39e72f643b8309a6ad0b44380d762ee0c64862e5f0cf2a8d69616c2e51b'.freeze
+
+      # Replaces jruby/kernel.rb, which JRuby runs at every boot, with a copy
+      # that loads ProcessManager and Pathname on first use.  It is replaced
+      # inside the jar: AGP merges the Java resources of all jars into the
+      # APK, where a second jruby/kernel.rb would clash with this one.
+      # A different JRuby version keeps its own file until the override has
+      # been updated for it.
+      def replace_jruby_kernel_rb(override)
+        require 'digest'
+        target = 'jruby/kernel.rb'
+        if File.exist?(target) && Digest::SHA256.file(target).hexdigest == JRUBY_KERNEL_RB_SHA256
+          print 'Replacing jruby/kernel.rb...'
+          FileUtils.cp override, target
+          puts 'Done.'
+        else
+          puts "jruby/kernel.rb differs from the version #{File.basename(override)} is based on; keeping it."
+        end
       end
 
       # Makes the unpacked jruby-core classes in the current directory run on
