@@ -2,7 +2,6 @@ package THE_PACKAGE;
 
 import java.io.IOException;
 import org.ruboto.Script;
-import android.app.ProgressDialog;
 import android.os.Bundle;
 
 public class THE_RUBOTO_CLASS THE_ACTION THE_ANDROID_CLASS {
@@ -13,14 +12,16 @@ public class THE_RUBOTO_CLASS THE_ACTION THE_ANDROID_CLASS {
      * @return true if onCreate() should just call super and terminate.
      */
     private boolean preOnCreate(Bundle bundle) {
-        System.out.println("RubotoActivity onCreate(): " + getClass().getName() + ", finishing: " + isFinishing());
+        if (JRubyAdapter.isDebugBuild()) {
+            Log.d("RubotoActivity onCreate(): " + getClass().getName() + ", finishing: " + isFinishing());
+        }
 
         if (isFinishing()) return true;
 
         // Shut this RubotoActivity down if it's not able to restart
         if (this.getClass().getName().equals("org.ruboto.RubotoActivity") && !JRubyAdapter.isInitialized()) {
             super.onCreate(bundle);
-            System.out.println("Shutting down stale RubotoActivity: " + getClass().getName());
+            Log.i("Shutting down stale RubotoActivity: " + getClass().getName());
             finish();
             return true;
         }

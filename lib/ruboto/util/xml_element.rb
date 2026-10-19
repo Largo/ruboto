@@ -155,7 +155,9 @@ module Ruboto
         rv ? "return #{rv}" : default_return
       end
 
-      def ruby_call(snake_case = false)
+      # The Ruby call for the callback; method_name is the Java expression
+      # holding the name of the Ruby handler.
+      def ruby_call(method_name = 'rubyMethod')
         params = parameters
         args = ''
         if params.size > 1
@@ -178,47 +180,42 @@ module Ruboto
           convert_return = "#{return_class.sub(/<.*>$/, '')}.class, "
         end
 
-        method_name = snake_case ? snake_case_attribute : attribute('name')
-        ["#{return_cast}JRubyAdapter.runRubyMethod(#{convert_return}scriptInfo.getRubyInstance(), \"#{method_name}\"#{args});"]
+        "#{return_cast}JRubyAdapter.runRubyMethod(#{convert_return}scriptInfo.getRubyInstance(), #{method_name}#{args});"
       end
 
       def snake_case_attribute
         attribute('name').gsub(/[A-Z]/) { |i| "_#{i}" }.downcase
       end
 
-      def method_definition(class_name)
-        entry_point_guard = (activity_super_guard(class_name, attribute('name')) ||
-            service_super_guard(class_name, attribute('name')))
+      # index numbers the callbacks of the generated class; ScriptInfo keeps
+      # the per-callback state (handler lookup, active handler) under it.
+      #
+      # A callback without a Ruby handler goes straight to super, without
+      # entering Ruby.  While the handler runs, a call that comes back into the
+      # same method is the handler's `super` only if JRuby made it; Android
+      # calling the method again (e.g. LayoutInflater asking onCreateView for
+      # the children of a view the handler inflates) still reaches the handler.
+      def method_definition(class_name, index)
+        name = attribute('name')
+        entry_point_guard = (activity_super_guard(class_name, name) ||
+            service_super_guard(class_name, name))
+        on_destroy = name == 'onDestroy'
+        no_handler = on_destroy ? "{if (scriptInfo.isLoaded()) ScriptLoader.unloadScript(this); #{super_return}}" : super_return
         method_call(
             (attribute('return') ? attribute('return') : 'void'),
-            attribute('name'), parameters,
+            name, parameters,
             get_elements('exception').map { |m| m.attribute('type') },
-            ["if (ScriptLoader.isCalledFromJRuby()) #{super_return}",
-                (entry_point_guard && (entry_point_guard + load_script)) ||
-                    if_else('!JRubyAdapter.isInitialized()',
-                        [%Q{Log.i("Method called before JRuby runtime was initialized: #{class_name}##{attribute('name')}");},
-                            super_return]),
-                'String rubyClassName = scriptInfo.getRubyClassName();',
-                "if (rubyClassName == null) #{super_return}",
-                if_else(
-                    "ScriptLoader.hasRubyMethod(rubyClassName, \"#{attribute('name')}\", false)",
-                    ruby_call,
-                    if_else(
-                        "ScriptLoader.hasRubyMethod(rubyClassName, \"#{snake_case_attribute}\", false)",
-                        ruby_call(true),
-                        if_else(
-                            "ScriptLoader.hasRubyMethod(rubyClassName, \"#{snake_case_attribute}\", true)",
-                            ruby_call(true),
-                            # FIXME(uwe):  Can the method be unimplemented?  Is the Ruby instance always an instance of this class?
-                            #if_else(
-                            #    "(Boolean)JRubyAdapter.runScriptlet(rubyClassName + \".instance_methods(true).any?{|m| m.to_sym == :#{attribute('name')}}\")",
-                            ruby_call,
-                        #    [super_return]
-                        #)
-                        )
-                    )
-                ),
-                ('ScriptLoader.unloadScript(this);' if attribute('name') == 'onDestroy'),
+            ["if (scriptInfo.isCallbackActive(#{index}) && ScriptLoader.isSuperCall(\"#{name}\")) #{super_return}",
+                (entry_point_guard + load_script if entry_point_guard),
+                "String rubyMethod = ScriptLoader.rubyCallback(this, #{index}, \"#{name}\", \"#{snake_case_attribute}\");",
+                "if (rubyMethod == null) #{no_handler}",
+                "scriptInfo.enterCallback(#{index});",
+                'try {',
+                [ruby_call].indent,
+                '} finally {',
+                ["scriptInfo.exitCallback(#{index});",
+                    ('ScriptLoader.unloadScript(this);' if on_destroy)].compact.indent,
+                '}',
             ]
         ).indent.join("\n")
       end

@@ -121,7 +121,7 @@ module Ruboto
             'THE_RUBOTO_CLASS' => params[:name],
             'THE_CONSTRUCTORS' => class_desc.name == 'class' ?
                 class_desc.get_elements('constructor').map { |i| i.constructor_definition(params[:name]) }.join("\n\n") : '',
-            'THE_METHODS' => methods_header + methods.map { |i| i.method_definition(params[:name]) }.join("\n\n")
+            'THE_METHODS' => methods_header + methods.each_with_index.map { |m, i| m.method_definition(params[:name], i) }.join("\n\n")
         }
       end
 

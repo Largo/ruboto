@@ -1,23 +1,25 @@
 package org.ruboto;
 
-import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 
 public class Script {
-    private static String[] scriptsDir = new String[]{"scripts"};
+    // Replaced, never modified, so readers on other threads need no lock.
+    private static volatile String[] scriptsDir = new String[]{"scripts"};
 
     private final String name;
+    private String absolutePath;
+    private boolean resolved;
 
-    public static void addDir(String dir) {
+    public static synchronized void addDir(String dir) {
         String[] oldScriptsDir = scriptsDir;
-    	scriptsDir = new String[scriptsDir.length + 1];
-    	scriptsDir[0] = dir;
-    	for(int i = 0 ; i < oldScriptsDir.length ; i++) {
-    	    scriptsDir[i + 1] = oldScriptsDir[i];
-    	}
+        String[] dirs = new String[oldScriptsDir.length + 1];
+        dirs[0] = dir;
+        System.arraycopy(oldScriptsDir, 0, dirs, 1, oldScriptsDir.length);
+        scriptsDir = dirs;
     }
 
     public static String toCamelCase(String s) {
@@ -52,16 +54,25 @@ public class Script {
         return getAbsolutePath() != null;
     }
 
+    // Resolved once: loading a script asks for it several times.
     String getAbsolutePath() {
+        if (!resolved) {
+            absolutePath = resolve();
+            resolved = true;
+        }
+        return absolutePath;
+    }
+
+    private String resolve() {
         for (String dir : scriptsDir) {
+            // jar: and uri: entries are covered by the class loader below.
+            if (dir.startsWith("jar:") || dir.startsWith("uri:")) continue;
             String path = dir + "/" + name;
-            Log.d("Checking path: " + path);
             if (new File(path).exists()) {
                 return "file:" + path;
             }
         }
-        URL url = getClass().getClassLoader().getResource(name);
-        Log.d("Classpath resource: " + url);
+        URL url = Script.class.getClassLoader().getResource(name);
         if (url != null) {
             return url.toString();
         }
@@ -79,28 +90,24 @@ public class Script {
     }
 		
     public String getContents() throws IOException {
-        InputStream is = null;
-        BufferedReader buffer = null;
+        String path = getAbsolutePath();
+        if (path == null) {
+            throw new IOException("Script not found: " + name);
+        }
+        // Read by hand: InputStream.readAllBytes needs API 33.
+        InputStream is = new URL(path).openStream();
         try {
-            buffer = new BufferedReader(new java.io.InputStreamReader(new URL(getAbsolutePath()).openStream()), 8192);
-            StringBuilder source = new StringBuilder();
-            while (true) {
-                String line = buffer.readLine();
-                if (line == null) {
-                    break;
-                }
-                source.append(line).append("\n");
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream(8192);
+            byte[] buffer = new byte[8192];
+            for (int n; (n = is.read(buffer)) != -1; ) {
+                bytes.write(buffer, 0, n);
             }
-            return source.toString();
-		} finally {
-			if (is != null) {
-				is.close();
-			}
-			if (is != null) {
-				buffer.close();
-			}
-		}
-	}
+            // Ruby source is UTF-8 whatever the platform charset says.
+            return bytes.toString("UTF-8");
+        } finally {
+            is.close();
+        }
+    }
 
     public String getName() {
         return name;
