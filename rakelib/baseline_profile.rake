@@ -15,9 +15,13 @@ require 'tmpdir'
 #
 #   rake baseline_profile ART_HARNESS=/root/workspace/ruboto-startup/apk-layout
 #
-# This generates org.ruboto.startup from this checkout, builds its benchmark
-# APK (APK=<path> skips that), boots JRuby under ART with the JIT profile
-# saver on, and converts the profile.
+# This generates org.ruboto.startup from this checkout twice, with the
+# default minSdk and with --min-sdk 23, builds their benchmark APKs
+# (APK=<path>[,<path>...] skips that), boots JRuby under ART with the JIT
+# profile saver on, and merges the profiles.  Below API 26 the jruby-core
+# rewrite (org/ruboto/invoke) and library desugaring (j$/) change about 700
+# of the boot's methods and classes; AGP drops the rules that do not match an
+# app's dex, so one template serves both.
 #
 # From a device instead (not tried yet; any non-debuggable build of a freshly
 # generated app, reset to 'verify' first so AOT code from an older profile
@@ -61,11 +65,11 @@ module BaselineProfile
 
   module_function
 
-  def build_apk(dir)
+  def build_apk(dir, min_sdk = nil)
     root = File.expand_path('..', __dir__)
-    app = File.join(dir, 'startup')
+    app = File.join(dir, "startup#{min_sdk}")
     sh RbConfig.ruby, "-I#{root}/lib", "#{root}/bin/ruboto", 'gen', 'app',
-        '--package', PACKAGE, '--name', 'Startup', '--path', app
+        '--package', PACKAGE, '--name', 'Startup', '--path', app, *(['--min-sdk', min_sdk] if min_sdk)
     Dir.chdir(app) { sh 'nice', '-n', '10', ENV['GRADLE'] || 'gradle', '--no-daemon', '-q', 'assembleBenchmark' }
     File.join(app, 'app/build/outputs/apk/benchmark/app-benchmark.apk')
   end
@@ -152,9 +156,10 @@ task :baseline_profile do
       source = 'a device profile dump'
     else
       harness = ENV['ART_HARNESS'] || abort('Set ART_HARNESS (ART chroot harness dir) or PROFILE_DUMP (profman text dump).')
-      apk = ENV['APK'] || BaselineProfile.build_apk(work)
-      dump = BaselineProfile.dump_from_art(File.expand_path(harness), File.expand_path(apk),
-                                           (ENV['RUNS'] || 3).to_i, work)
+      apks = ENV['APK'] ? ENV['APK'].split(',') : [BaselineProfile.build_apk(work), BaselineProfile.build_apk(work, '23')]
+      dump = apks.map do |apk|
+        BaselineProfile.dump_from_art(File.expand_path(harness), File.expand_path(apk), (ENV['RUNS'] || 3).to_i, work)
+      end.join("\n")
       source = 'Android 14 ART (dalvikvm in a chroot)'
     end
     jruby_version = ENV['JRUBY_VERSION'] || Dir["#{work}/startup/libs/jruby-core-*.jar"].first.to_s[/jruby-core-(.+)\.jar/, 1] || 'unknown'
