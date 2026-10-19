@@ -178,7 +178,9 @@ adb install-multiple app/build/outputs/apk/benchmark/app-benchmark.apk \
 adb shell cmd package compile -f -m speed-profile org.ruboto.todo
 ```
 
-Add your own hot code to `baseline-prof.txt` if you like; the file in
+Add your own hot code at the end of `baseline-prof.txt` if you like, below
+the `# Rules for this app` line: `ruboto update app` replaces the JRuby part
+above it and keeps the rest.  The template in
 [`assets/app/src/main`](assets/app/src/main/baseline-prof.txt) is regenerated
 for each JRuby version with `rake baseline_profile` (see
 [`rakelib/baseline_profile.rake`](rakelib/baseline_profile.rake)).
@@ -410,6 +412,44 @@ Update your `app/gems.rb` (or `app/Gemfile`) and run
   ```shell
   bundle exec rake bundle
   ```
+
+## Behaviour changes from the start-up work
+
+Apps generated with an earlier Ruboto 2 snapshot pick these up with
+`ruboto update app`.  It also copies in the baseline profile, but leaves
+`app/build.gradle` alone: copy the `benchmark` build type and the
+`profileinstaller` dependency from a newly generated app to get those.
+
+* **Callbacks reach their Ruby handler whenever Android makes them.**  The
+  generated Java classes used to skip the Ruby handler whenever JRuby was
+  anywhere in the last few stack frames.  That also swallowed callbacks that
+  Android makes synchronously from inside a Java call your Ruby code makes,
+  e.g. `on_content_changed` from `set_content_view` or `on_title_changed`
+  from `set_title`.  These handlers now run.  A
+  handler's `super` still goes to the Android implementation, and Ruby code
+  calling a callback by its Java name (`onResume`) now runs the Ruby handler
+  instead of skipping it.
+* If a class has both spellings of a handler (`on_resume` and `onResume`),
+  the one defined nearest to the class in its ancestry wins (camelCase if
+  both are defined in the same class or module).
+* `$:` no longer has `uri:classloader:/` (JRuby falls back to the class
+  loader anyway), the APK entry has no trailing slash, the unpackaged
+  `site_ruby` entries are gone, and the scripts directory is only on it when
+  it holds scripts.
+* The top-level helpers (`ruboto_import_widget`, `set_attribute`, …) and the
+  `android` / `method_missing` Kernel additions live in modules included into
+  `Object`; `Kernel#old_method_missing` is gone.  `AndroidIds` and
+  `Ruboto::Id` are loaded on first use, and `View.convert_constant` resolves
+  symbols lazily (`View.constant_conversions` still returns the full table).
+* Without a `splash` layout the splash shows a spinner instead of a
+  `ProgressDialog`.  Back during start-up leaves the app
+  (`finishAndRemoveTask`) instead of calling `System.exit`; JRuby keeps
+  starting in the background.
+* An exception raised by `environment.rb` other than `LoadError` now fails
+  the start-up with the "Failed to initialize Ruboto Core" message instead of
+  crashing the process.
+* Backticks, `system` and `IO.popen` use `/system/bin/sh`, which exists on
+  every Android version (`/bin/sh` only from Android 10).
 
 ## Adding Ruboto to an existing Android Studio project
 

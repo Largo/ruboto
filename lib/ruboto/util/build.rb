@@ -415,13 +415,31 @@ module Ruboto
       # at install, so JRuby's boot does not run in the interpreter.  The
       # template lists what a JRuby boot executes (rake baseline_profile in
       # the Ruboto repo regenerates it); the app's own classes are added here.
+      # `ruboto update app` rewrites the file for the new JRuby boot, but keeps
+      # what the app added below BASELINE_PROFILE_APP_MARKER, and all of a
+      # profile Ruboto did not write.
+      BASELINE_PROFILE_APP_MARKER = '# Rules for this app; ruboto update app keeps everything below this line.'.freeze
+
       def write_baseline_profile(main_dir, package)
-        profile = File.read(File.join(Ruboto::ASSETS, 'app/src/main/baseline-prof.txt'))
+        template = File.read(File.join(Ruboto::ASSETS, 'app/src/main/baseline-prof.txt'))
+        file = File.join(main_dir, 'baseline-prof.txt')
+        app_rules = ''
+        if File.exist?(file)
+          old = File.read(file)
+          if old.start_with?(template.lines.first)
+            app_rules = old.split("#{BASELINE_PROFILE_APP_MARKER}\n", 2)[1].to_s
+          else
+            app_rules = old
+          end
+        end
+        profile = template.dup
+        profile << "\n" unless profile.end_with?("\n")
         app_path = package.tr('.', '/')
         unless app_path.start_with?('org/ruboto/')
           profile << "HSPL#{app_path}/**->**(**)**\nL#{app_path}/**;\n"
         end
-        File.write(File.join(main_dir, 'baseline-prof.txt'), profile)
+        profile << "#{BASELINE_PROFILE_APP_MARKER}\n" << app_rules
+        File.write(file, profile)
       end
 
       def methods_header
