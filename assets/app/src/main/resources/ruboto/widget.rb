@@ -90,32 +90,68 @@ module Ruboto
 end
 
 View.class_eval do
+  # Symbol to constant conversions, like :center => Gravity::CENTER.  Listing
+  # every constant of the registered classes at require time is slow, so the
+  # classes are kept as sources and a symbol is resolved on first use by its
+  # upcased name, latest registration first (later registrations used to
+  # overwrite earlier ones in the eager table).  The rest of the API
+  # (constant_conversions, add_constant_conversion, and symbols this lookup
+  # misses) is rarely used and costs parse time on every start, so it is in
+  # ruboto/widget/constant_conversions.rb, loaded on first use.
+  #
   # Ruby 3+ forbids class variable access from class_eval blocks, so the
-  # conversion table lives in a class-level instance variable instead.
-  def self.constant_conversions
-    @convert_constants ||= {}
+  # state lives in class-level instance variables.
+  def self.constant_conversion_sources
+    @constant_conversion_sources ||= []
   end
 
-  def self.add_constant_conversion(from, to)
-    symbol = from.to_s.downcase.to_sym
-    if constant_conversions.include?(symbol)
-      puts "WARNING: Overwriting symbol to constant conversion for #{symbol.inspect}:  #{constant_conversions[symbol].inspect} => #{to.inspect}"
-    end
-    constant_conversions[symbol] = to
+  # Registers the constants of klass, or with own_only only those that its
+  # superclass does not have, without listing them.
+  def self.add_constant_conversion_source(klass, own_only = false)
+    constant_conversion_sources << [klass, own_only]
+    @resolved_constant_conversions = nil
   end
 
   def self.convert_constant(from)
     return from unless from.is_a?(Symbol)
-    unless constant_conversions.include?(from)
-      raise "Symbol #{from.inspect} doesn't have a corresponding View constant #{from.to_s.upcase}."
+    cache = (@resolved_constant_conversions ||= {})
+    cache.fetch(from) { cache[from] = resolve_constant_conversion(from) }
+  end
+
+  # const_defined? also sees Object's constants, which Module#constants
+  # leaves out, so those names take the slow path.
+  def self.resolve_constant_conversion(symbol)
+    name = symbol.to_s
+    constant_name = name.upcase
+    if name == name.downcase && constant_name.match?(/\A[A-Z]\w*\z/) && !Object.const_defined?(constant_name, false)
+      constant_conversion_sources.reverse_each do |klass, own_only|
+        if klass.const_defined?(constant_name) && !(own_only && klass.superclass.const_defined?(constant_name))
+          return klass.const_get(constant_name)
+        end
+      end
     end
-    constant_conversions[from]
+    load_constant_conversions
+    resolve_constant_conversion(symbol)
+  end
+
+  def self.constant_conversions
+    load_constant_conversions
+    constant_conversions
+  end
+
+  def self.add_constant_conversion(from, to)
+    load_constant_conversions
+    add_constant_conversion(from, to)
+  end
+
+  # Replaces the methods above, except the sources.  "load", not "require",
+  # so that this cannot recurse after ruboto/widget.rb has been loaded again.
+  def self.load_constant_conversions
+    load 'ruboto/widget/constant_conversions.rb'
   end
 
   def self.setup_constant_conversion
-    (self.constants - self.superclass.constants).each do |i|
-      View.add_constant_conversion i, self.const_get(i)
-    end
+    View.add_constant_conversion_source self, true
   end
 
   def configure(context, params = {})
@@ -147,17 +183,13 @@ end
 # Load ViewGroup constants
 #
 java_import 'android.view.ViewGroup'
-ViewGroup::LayoutParams.constants.each do |i|
-  View.add_constant_conversion i, ViewGroup::LayoutParams.const_get(i)
-end
+View.add_constant_conversion_source ViewGroup::LayoutParams
 
 #
 # Load Gravity constants
 #
 java_import 'android.view.Gravity'
-Gravity.constants.each do |i|
-  View.add_constant_conversion i, Gravity.const_get(i)
-end
+View.add_constant_conversion_source Gravity
 
 #
 # RubotoActivity View Generation
