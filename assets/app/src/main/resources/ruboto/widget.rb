@@ -164,6 +164,41 @@ end
 #
 
 module Ruboto
+  module Widget
+    # Defines a widget method like RubotoActivity#linear_layout(params = {}, &block).
+    # A closure instead of a class_eval'ed source string saves parsing and
+    # building the method once per widget and owner class.  In a fragment the
+    # view's context is the fragment's activity.
+    def self.define_widget_method(owner, method_name, widget_class, fragment = false)
+      owner.send(:define_method, method_name) do |params = {}, &block|
+        context = fragment ? activity : self
+        if (force_style = params.delete(:default_style))
+          rv = widget_class.new(context, nil, force_style)
+        elsif (api_key = params.delete(:apiKey))
+          rv = widget_class.new(context, api_key)
+        else
+          rv = widget_class.new(context)
+        end
+
+        if (parent = (params.delete(:parent) || @view_parent))
+          parent.addView(rv, (params.delete(:parent_index) || parent.child_count))
+        end
+
+        rv.configure context, params
+
+        return rv unless block
+
+        old_view_parent, @view_parent = @view_parent, rv
+        block.call
+        @view_parent = old_view_parent
+
+        rv
+      end
+    end
+  end
+end
+
+module Ruboto
   module WidgetFunctions
     private
 
@@ -182,36 +217,13 @@ module Ruboto
 
       return unless klass
 
-      method_str = "
-         def #{(class_name.to_s.gsub(/([A-Z])/) { '_' + $1.downcase })[1..-1]}(params={})
-            if force_style = params.delete(:default_style)
-              rv = #{class_name}.new(self, nil, force_style)
-            elsif api_key = params.delete(:apiKey)
-              rv = #{class_name}.new(self, api_key)
-            else
-              rv = #{class_name}.new(self)
-            end
-
-            if parent = (params.delete(:parent) || @view_parent)
-              parent.addView(rv, (params.delete(:parent_index) || parent.child_count))
-            end
-
-            rv.configure self, params
-
-            return rv unless block_given?
-
-            old_view_parent, @view_parent = @view_parent, rv
-            yield
-            @view_parent = old_view_parent
-
-            rv
-         end
-       "
-      RubotoActivity.class_eval method_str
+      widget_class = klass.is_a?(Array) ? klass.first : klass # java_import returns the list of imported classes
+      method_name = class_name.to_s.gsub(/([A-Z])/) { '_' + $1.downcase }[1..-1]
+      Ruboto::Widget.define_widget_method(RubotoActivity, method_name, widget_class)
 
       # FIXME(uwe): Remove condition when we stop support for api level < 11
       if android.os.Build::VERSION::SDK_INT >= 11
-        android.app.Fragment.class_eval method_str.gsub('self', 'activity')
+        Ruboto::Widget.define_widget_method(android.app.Fragment, method_name, widget_class, true)
       end
       # EMXIF
 
