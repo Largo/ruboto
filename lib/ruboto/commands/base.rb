@@ -432,6 +432,7 @@ module Ruboto
                 update_manifest nil, nil, force
                 update_icons force
                 update_core_classes 'exclude'
+                update_baseline_profile
                 update_bundle
               end
             end

@@ -389,6 +389,17 @@ module Ruboto
         system 'rake ruboto_activity'
       end
 
+      # The profile lists the methods of the JRuby boot this Ruboto version
+      # ships, so refresh it with the jars.  Apps generated before the profile
+      # existed get it too, but not the profileinstaller dependency: for those,
+      # the profile is used by Play installs and by install-multiple with .dm.
+      def update_baseline_profile
+        return unless File.directory?('app/src/main')
+        log_action('Copying the baseline profile') do
+          write_baseline_profile('app/src/main', verify_package)
+        end
+      end
+
       def read_ruboto_version
         version_file = File.expand_path("./#{SCRIPTS_DIR}/ruboto/version.rb")
         File.read(version_file).slice(/^\s*VERSION = '(.*?)'/, 1) if File.exist?(version_file)

@@ -205,6 +205,9 @@ public class JRubyAdapter {
         System.setProperty("jruby.native.enabled", "false");
         System.setProperty("jruby.objectspace.enabled", "false");
         System.setProperty("jruby.rewrite.java.trace", "true");
+        // Backticks, system and IO.popen run commands through jruby.shell,
+        // default /bin/sh.  Only Android 10+ has the /bin -> /system/bin link.
+        System.setProperty("jruby.shell", "/system/bin/sh");
 
         // Uncomment these to debug/profile Ruby source loading
         // Analyse the output: grep "LoadService:   <-" | cut -f5 -d- | cut -c2- | cut -f1 -dm | awk '{total = total + $1}END{print total}'
