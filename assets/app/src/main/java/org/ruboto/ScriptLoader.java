@@ -1,13 +1,26 @@
 package org.ruboto;
 
-import android.app.ProgressDialog;
 import android.content.Context;
+import android.os.Looper;
+import android.widget.Toast;
+
+import org.jruby.Ruby;
+import org.jruby.RubyClass;
+import org.jruby.javasupport.Java;
+import org.jruby.runtime.ThreadContext;
+import org.jruby.runtime.builtin.IRubyObject;
 
 import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 public class ScriptLoader {
+    // Scripts are evaluated on their own thread to get a stack as large as the
+    // UI thread's: the JRuby interpreter recurses deeply.  ART only adds about
+    // 1 MB to the size requested here, so 128 KB made for a 1.1 MB stack.
+    private static final long SCRIPT_STACK_SIZE = 8 * 1024 * 1024;
+
     private static final Map<String, Boolean> methodCache = new ConcurrentHashMap<String, Boolean>();
 
    /**
@@ -57,6 +70,61 @@ public class ScriptLoader {
         return false;
     }
 
+    ///////////////////////////////////////////////////////////////////////////
+    //
+    // Script loading
+    //
+
+    // Line-anchored and with the name quoted: `class XHelper`, comments and
+    // strings mentioning the class do not count.
+    private static boolean definesClass(String script, String rubyClassName) {
+        return Pattern.compile("^[ \\t]*class[ \\t]+(?:::)?" + Pattern.quote(rubyClassName) + "\\b", Pattern.MULTILINE)
+                .matcher(script).find();
+    }
+
+    // Make the Ruby constant refer to the Java proxy class, so that the script's
+    // `class X` reopens the proxy instead of defining a new Ruby class.
+    private static void bindJavaProxy(String rubyClassName, Class<?> javaClass) {
+        ThreadContext context = JRubyAdapter.getRuntime().getCurrentContext();
+        context.runtime.getObject().setConstant(context, rubyClassName, Java.getProxyClass(context, javaClass));
+    }
+
+    private static IRubyObject topLevelConstant(String name) {
+        ThreadContext context = JRubyAdapter.getRuntime().getCurrentContext();
+        return context.runtime.getObject().getConstantAt(context, name);
+    }
+
+   /**
+    Evaluate the script on a thread with a large stack, and rethrow on this
+    thread what the evaluation threw: join() alone would drop it, and the
+    script thread's uncaught exception would kill the process.
+    */
+    private static void evaluate(final Script script, final String source, String what) {
+        final Throwable[] failure = new Throwable[1];
+        Thread t = new Thread(null, new Runnable() {
+            public void run() {
+                long loadStart = System.currentTimeMillis();
+                try {
+                    JRubyAdapter.setScriptFilename(script.getAbsolutePath());
+                    JRubyAdapter.runScriptlet(source);
+                } catch (Throwable e) {
+                    failure[0] = e;
+                }
+                Log.d("Script load took " + (System.currentTimeMillis() - loadStart) + "ms");
+            }
+        }, "ScriptLoader " + what, SCRIPT_STACK_SIZE);
+        t.start();
+        try {
+            t.join();
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted loading script.", ie);
+        }
+        if (failure[0] instanceof RuntimeException) throw (RuntimeException) failure[0];
+        if (failure[0] instanceof Error) throw (Error) failure[0];
+        if (failure[0] != null) throw new RuntimeException(failure[0]);
+    }
+
    /**
     Define the Ruby class backing the given Activity ahead of time.
 
@@ -74,7 +142,7 @@ public class ScriptLoader {
         try {
             final Class<?> javaClass = Class.forName(javaClassName);
             final String rubyClassName = javaClass.getSimpleName();
-            if (JRubyAdapter.get(rubyClassName) != null) {
+            if (topLevelConstant(rubyClassName) != null) {
                 Log.d("Ruby class already defined: " + rubyClassName);
                 return;
             }
@@ -84,47 +152,22 @@ public class ScriptLoader {
                 return;
             }
             final String script = rubyScript.getContents();
-            if (!script.matches("(?s).*class\\s+" + rubyClassName + ".*")) {
+            if (!definesClass(script, rubyClassName)) {
                 Log.d("Script does not define " + rubyClassName + ", leaving it to loadScript");
                 return;
             }
             Log.d("Preloading script: " + rubyScript.getName());
-
-            // Same handshake loadScript() performs, so it recognises the class as
-            // the Java proxy and skips its own load.
-            Object rubyClass = JRubyAdapter.runScriptlet("Java::" + javaClassName);
-            JRubyAdapter.put("$" + rubyClassName, rubyClass);
-            JRubyAdapter.runScriptlet(rubyClassName + " = $" + rubyClassName);
-
-            // Evaluated on its own thread to keep the stack size loadScript uses.
-            // join() does not rethrow what the child threw, so the failure is
-            // handed back deliberately; without this a script that raises while
-            // being evaluated would reach Android's default handler and kill the
-            // process from under the splash.
-            final Throwable[] failure = new Throwable[1];
-            Thread t = new Thread(null, new Runnable() {
-                public void run() {
-                    long loadStart = System.currentTimeMillis();
-                    try {
-                        JRubyAdapter.setScriptFilename(rubyScript.getAbsolutePath());
-                        JRubyAdapter.runScriptlet(script);
-                        Log.d("Preload took " + (System.currentTimeMillis() - loadStart) + "ms");
-                    } catch (Throwable e) {
-                        failure[0] = e;
-                    }
-                }
-            }, "ScriptLoader preload for " + rubyClassName, 128 * 1024);
-            t.start();
-            t.join();
-            if (failure[0] != null) {
+            bindJavaProxy(rubyClassName, javaClass);
+            try {
+                evaluate(rubyScript, script, "preload for " + rubyClassName);
+                clearMethodCache();
+            } catch (Throwable e) {
                 // Leave the reporting to loadScript, which knows the component.
-                Log.e("Preloading " + rubyClassName + " failed: " + failure[0]);
-                return;
+                // Unbind the proxy so that loadScript evaluates the script again.
+                Log.e("Preloading " + rubyClassName + " failed: " + e);
+                ThreadContext context = JRubyAdapter.getRuntime().getCurrentContext();
+                context.runtime.getObject().deleteConstant(context, rubyClassName);
             }
-            clearMethodCache();
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-            Log.e("Interrupted preloading script: " + ie);
         } catch (Throwable t) {
             Log.e("Failed to preload script: " + t);
         }
@@ -132,77 +175,38 @@ public class ScriptLoader {
 
     public static void loadScript(final RubotoComponent component) {
         try {
-            if (component.getScriptInfo().getScriptName() != null) {
-                Log.d("Looking for Ruby class: " + component.getScriptInfo().getRubyClassName());
-                Object rubyClass = JRubyAdapter.get(component.getScriptInfo().getRubyClassName());
-                Log.d("Found: " + rubyClass);
-                final Script rubyScript = new Script(component.getScriptInfo().getScriptName());
+            final ScriptInfo info = component.getScriptInfo();
+            final String rubyClassName = info.getRubyClassName();
+            if (info.getScriptName() != null) {
+                IRubyObject rubyClass = topLevelConstant(rubyClassName);
+                final Script rubyScript = new Script(info.getScriptName());
                 Object rubyInstance;
                 if (rubyScript.exists()) {
-                    Log.d("Found script.");
                     rubyInstance = component;
-                    final String script = rubyScript.getContents();
-                    boolean scriptContainsClass = script.matches("(?s).*class\\s+"
-                            + component.getScriptInfo().getRubyClassName() + ".*");
-                    boolean hasBackingJavaClass = component.getScriptInfo().getRubyClassName()
-                            .equals(component.getClass().getSimpleName());
-                    if (scriptContainsClass) {
+                    boolean hasBackingJavaClass = rubyClassName.equals(component.getClass().getSimpleName());
+                    // The constant is the Java proxy once preloadScript() or an
+                    // earlier instance of this component evaluated the script.
+                    if (!hasBackingJavaClass || rubyClass != Java.getProxyClass(JRubyAdapter.getRuntime(), component.getClass())) {
+                        if (JRubyAdapter.isDebugBuild()) Log.d("Loading script: " + info.getScriptName());
+                        final String script = rubyScript.getContents();
+                        if (!definesClass(script, rubyClassName)) {
+                            throw new RuntimeException("Expected file " + info.getScriptName()
+                                    + " to define class " + rubyClassName);
+                        }
                         if (hasBackingJavaClass) {
-                            Log.d("hasBackingJavaClass");
-                            if (rubyClass != null && !rubyClass.toString().startsWith("Java::")) {
-                                Log.d("Found Ruby class instead of Java class.  Reloading.");
-                                rubyClass = null;
-                            }
+                            bindJavaProxy(rubyClassName, component.getClass());
                         } else {
-                            Log.d("Script defines methods on meta class");
-                            rubyClass = JRubyAdapter.runRubyMethod(component, "singleton_class");
+                            // Script defines methods on the meta class
+                            rubyClass = (IRubyObject) JRubyAdapter.runRubyMethod(IRubyObject.class, component, "singleton_class");
+                            ThreadContext context = JRubyAdapter.getRuntime().getCurrentContext();
+                            context.runtime.getObject().setConstant(context, rubyClassName, rubyClass);
                         }
-                    }
-                    if (rubyClass == null || !hasBackingJavaClass) {
-                        Log.d("Loading script: " + component.getScriptInfo().getScriptName());
-                        if (scriptContainsClass) {
-                            Log.d("Script contains class definition");
-                            if (rubyClass == null && hasBackingJavaClass) {
-                                Log.d("Script has separate Java class");
-                                rubyClass = JRubyAdapter.runScriptlet("Java::" + component.getClass().getName());
-                            }
-                            Log.d("Set class: " + rubyClass);
-                            // FIXME(uwe): This should work
-                            // JRubyAdapter.put(component.getScriptInfo().getRubyClassName(), rubyClass);
-                            // EMXIF
-
-                            // FIXME(uwe): Workaround since setting the constant with `put` fails
-                            JRubyAdapter.put("$" + component.getScriptInfo().getRubyClassName(), rubyClass);
-                            JRubyAdapter.runScriptlet(component.getScriptInfo().getRubyClassName() + " = $" + component.getScriptInfo().getRubyClassName());
-                            // EMXIF
-
-                            // FIXME(uwe):  Collect these threads in a ThreadGroup ?
-                            Thread t = new Thread(null, new Runnable(){
-                                public void run() {
-                                    long loadStart = System.currentTimeMillis();
-                                    JRubyAdapter.setScriptFilename(rubyScript.getAbsolutePath());
-                                    JRubyAdapter.runScriptlet(script);
-                                    Log.d("Script load took " + (System.currentTimeMillis() - loadStart) + "ms");
-                                }
-                            }, "ScriptLoader for " + rubyClass, 128 * 1024);
-                            try {
-                                t.start();
-                                t.join();
-                                clearMethodCache();
-                            } catch(InterruptedException ie) {
-                                Thread.currentThread().interrupt();
-                                throw new RuntimeException("Interrupted loading script.", ie);
-                            }
-                        } else {
-                            throw new RuntimeException("Expected file "
-                                    + component.getScriptInfo().getScriptName()
-                                    + " to define class "
-                                    + component.getScriptInfo().getRubyClassName());
-                        }
+                        evaluate(rubyScript, script, "for " + rubyClassName);
+                        clearMethodCache();
                     }
                 } else if (rubyClass != null) {
                     // We have a predefined Ruby class without corresponding Ruby source file.
-                    Log.d("Create separate Ruby instance for class: " + rubyClass);
+                    if (JRubyAdapter.isDebugBuild()) Log.d("Create separate Ruby instance for class: " + rubyClassName);
                     rubyInstance = JRubyAdapter.runRubyMethod(rubyClass, "new");
                     JRubyAdapter.runRubyMethod(rubyInstance, "instance_variable_set", "@ruboto_java_instance", component);
                 } else {
@@ -210,24 +214,36 @@ public class ScriptLoader {
                     Log.e("Missing script and class.  Either script or predefined class must be present.");
                     throw new RuntimeException("Either script or predefined class must be present.");
                 }
-                component.getScriptInfo().setRubyInstance(rubyInstance);
+                info.setRubyInstance(rubyInstance);
             }
             persistObjectProxy(component);
         } catch(IOException e){
-            e.printStackTrace();
-            if (component instanceof Context) {
-                ProgressDialog.show((Context) component, "Script failed", "Something bad happened", true, true);
+            Log.e("Script failed", e);
+            // Toast needs a Looper; components other than activities may be
+            // created on any thread.
+            if (component instanceof Context && Looper.myLooper() == Looper.getMainLooper()) {
+                Toast.makeText((Context) component, "Script failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private static Map<Object, Object> proxies() {
+        return (Map<Object, Object>) topLevelConstant("RUBOTO_JAVA_PROXIES");
+    }
+
+    // Same as `Java::<component class>.__persistent__ = true`: keep the Ruby
+    // wrapper (and the singleton methods and instance variables on it) for as
+    // long as the Java object lives.
     private static void persistObjectProxy(RubotoComponent component) {
-        JRubyAdapter.runScriptlet("Java::" + component.getClass().getName() + ".__persistent__ = true");
-        ((Map)JRubyAdapter.get("RUBOTO_JAVA_PROXIES")).put(component.getScriptInfo().getRubyInstance(), component.getScriptInfo().getRubyInstance());
+        Ruby runtime = JRubyAdapter.getRuntime();
+        ((RubyClass) Java.getProxyClass(runtime, component.getClass())).getRealClass().setCacheProxy(true);
+        Object instance = component.getScriptInfo().getRubyInstance();
+        proxies().put(instance, instance);
     }
 
     public static void unloadScript(RubotoComponent component) {
-        ((Map)JRubyAdapter.get("RUBOTO_JAVA_PROXIES")).remove(component.getScriptInfo().getRubyInstance());
+        proxies().remove(component.getScriptInfo().getRubyInstance());
     }
 
 }
