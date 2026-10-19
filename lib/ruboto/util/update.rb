@@ -540,6 +540,13 @@ module Ruboto
                     'com/kenai/jnr/x86asm',
                     'jnr/a64asm',
                     'org/joni/bench',
+
+                    # BeanManagerFactory creates a BeanManagerImpl even with
+                    # jruby.management.enabled=false, and its constructor
+                    # formats a date at every boot.  javax.management does not
+                    # exist on Android, so without the class the factory falls
+                    # back to its DummyBeanManager.
+                    'org/jruby/management/BeanManagerImpl*',
                 ]
               elsif gem_version >= Gem::Version.new('9.2.0.0')
                 #noinspection RubyLiteralArrayInspection
