@@ -331,6 +331,13 @@ module Ruboto
 
             dependencies {
                 implementation fileTree(dir: '../libs', include: ['*.jar'])#{desugaring_dependency}
+                // Writes the baseline profile (src/main/baseline-prof.txt) for
+                // ART on installs that bypass Play, e.g. adb install.
+                implementation('androidx.profileinstaller:profileinstaller:1.4.1') {
+                    // profileinstaller and androidx.startup are Java; the
+                    // Kotlin stdlib would only add about 1000 unused classes.
+                    exclude group: 'org.jetbrains.kotlin'
+                }
             }
           GRADLE
         end
@@ -352,6 +359,8 @@ module Ruboto
             </manifest>
           XML
         end
+
+        write_baseline_profile(manifest_dir, package)
 
         # Java source directory
         java_dir = File.join(manifest_dir, 'java', *package.split('.'))
@@ -399,6 +408,20 @@ module Ruboto
         end
 
         puts "Created Gradle project structure in #{root}"
+      end
+
+      # AGP compiles src/main/baseline-prof.txt into the APK
+      # (assets/dexopt/baseline.prof) and ART AOT-compiles the listed methods
+      # at install, so JRuby's boot does not run in the interpreter.  The
+      # template lists what a JRuby boot executes (rake baseline_profile in
+      # the Ruboto repo regenerates it); the app's own classes are added here.
+      def write_baseline_profile(main_dir, package)
+        profile = File.read(File.join(Ruboto::ASSETS, 'app/src/main/baseline-prof.txt'))
+        app_path = package.tr('.', '/')
+        unless app_path.start_with?('org/ruboto/')
+          profile << "HSPL#{app_path}/**->**(**)**\nL#{app_path}/**;\n"
+        end
+        File.write(File.join(main_dir, 'baseline-prof.txt'), profile)
       end
 
       def methods_header

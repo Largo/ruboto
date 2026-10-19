@@ -161,6 +161,28 @@ The time to the app's own screen is the second `Displayed
 org.ruboto.todo/.TodoActivity` line in logcat.  Repeat it a few times and take
 the median.
 
+Generated apps also ship a baseline profile
+(`app/src/main/baseline-prof.txt`, the JRuby methods and classes a Ruboto app
+runs while it starts) so that ART compiles JRuby's boot ahead of time; that
+takes roughly another 40% off a non-debuggable start.  Play installs it with
+the app.  After a plain `adb install` the first launches run without it until
+`androidx.profileinstaller` has handed it to ART and the device has compiled
+it in the background, so to measure the compiled state either install the
+profile along with the APK or compile right away:
+
+```shell
+# Android 12 and later (baselineProfiles/1/ is for Android 9 to 11)
+adb install-multiple app/build/outputs/apk/benchmark/app-benchmark.apk \
+    app/build/outputs/apk/benchmark/baselineProfiles/0/app-benchmark.dm
+# or after a plain adb install, once the app has run for a few seconds:
+adb shell cmd package compile -f -m speed-profile org.ruboto.todo
+```
+
+Add your own hot code to `baseline-prof.txt` if you like; the file in
+[`assets/app/src/main`](assets/app/src/main/baseline-prof.txt) is regenerated
+for each JRuby version with `rake baseline_profile` (see
+[`rakelib/baseline_profile.rake`](rakelib/baseline_profile.rake)).
+
 ## Sample: an IRB console
 
 [`assets/samples/irb_activity.rb`](assets/samples/irb_activity.rb) is a REPL you
