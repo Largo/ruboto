@@ -20,8 +20,8 @@ public class THE_RUBOTO_CLASS THE_ACTION THE_ANDROID_CLASS {
 
     public void onReceive(android.content.Context context, android.content.Intent intent) {
         try {
-            Log.d("onReceive: " + this + " " + ScriptLoader.isCalledFromJRuby());
-            if (ScriptLoader.isCalledFromJRuby()) {
+            // The Ruby handler's `super` lands here; BroadcastReceiver.onReceive is abstract.
+            if (scriptInfo.isCallbackActive(0) && ScriptLoader.isSuperCall("onReceive")) {
                 return;
             }
             if (!scriptInfo.isLoaded()) {
@@ -32,16 +32,18 @@ public class THE_RUBOTO_CLASS THE_ACTION THE_ANDROID_CLASS {
                 }
             }
 
-            // FIXME(uwe):  Simplify when we stop support for snake case aliasing interface callback methods.
-            if (ScriptLoader.hasRubyMethod(scriptInfo.getRubyClassName(), "onReceive", false)) {
-                Log.d("onReceive: call method");
-    	        JRubyAdapter.runRubyMethod(this, "onReceive", new Object[]{context, intent});
-            } else if (ScriptLoader.hasRubyMethod(scriptInfo.getRubyClassName(), "on_receive", false)) {
-    	        JRubyAdapter.runRubyMethod(this, "on_receive", new Object[]{context, intent});
+            String rubyMethod = ScriptLoader.rubyCallback(this, 0, "onReceive", "on_receive");
+            if (rubyMethod == null) {
+                return;
             }
-            // EMXIF
+            scriptInfo.enterCallback(0);
+            try {
+                JRubyAdapter.runRubyMethod(scriptInfo.getRubyInstance(), rubyMethod, new Object[]{context, intent});
+            } finally {
+                scriptInfo.exitCallback(0);
+            }
         } catch(Exception e) {
-            e.printStackTrace();
+            Log.e("onReceive failed", e);
         }
     }
 
