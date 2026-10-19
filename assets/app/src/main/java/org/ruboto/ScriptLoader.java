@@ -12,6 +12,7 @@ import org.jruby.java.invokers.RubyToJavaInvoker;
 import org.jruby.javasupport.Java;
 import org.jruby.javasupport.JavaUtil;
 import org.jruby.runtime.ThreadContext;
+import org.jruby.runtime.callsite.CacheEntry;
 import org.jruby.runtime.Visibility;
 import org.jruby.runtime.builtin.IRubyObject;
 
@@ -108,9 +109,28 @@ public class ScriptLoader {
     }
 
     static String resolveHandler(RubyClass klass, String camelName, String snakeName) {
-        if (isRubyDefined(klass.searchMethod(camelName))) return camelName;
-        if (isRubyDefined(klass.searchMethod(snakeName))) return snakeName;
+        CacheEntry camel = klass.searchWithCache(camelName);
+        CacheEntry snake = klass.searchWithCache(snakeName);
+        boolean hasCamel = isRubyDefined(camel.method);
+        boolean hasSnake = isRubyDefined(snake.method);
+        if (hasCamel && hasSnake) {
+            // Defined at different levels of the ancestry, the nearer one wins:
+            // the class's own on_resume over an onResume from an included module
+            // such as Ruboto::Activity::Reload.
+            return ancestorIndex(klass, snake.sourceModule) < ancestorIndex(klass, camel.sourceModule)
+                    ? snakeName : camelName;
+        }
+        if (hasCamel) return camelName;
+        if (hasSnake) return snakeName;
         return null;
+    }
+
+    private static int ancestorIndex(RubyClass klass, RubyModule module) {
+        int i = 0;
+        for (RubyModule m = klass; m != null; m = m.getSuperClass(), i++) {
+            if (m == module) return i;
+        }
+        return Integer.MAX_VALUE;
     }
 
     private static boolean isRubyDefined(DynamicMethod method) {
