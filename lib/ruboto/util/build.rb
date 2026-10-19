@@ -272,6 +272,17 @@ module Ruboto
                     release {
                         minifyEnabled false
                     }
+                    // Non-debuggable but debug-signed: judge and profile
+                    // start-up on this (gradle installBenchmark).  For a
+                    // debuggable app ART ignores AOT code and the baseline
+                    // profile and runs its slow interpreter, which makes
+                    // JRuby's boot about 3x slower than in a release build.
+                    benchmark {
+                        initWith release
+                        signingConfig signingConfigs.debug
+                        matchingFallbacks = ['release']
+                        profileable true
+                    }
                 }
 
                 compileOptions {
