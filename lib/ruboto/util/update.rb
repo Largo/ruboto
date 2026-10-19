@@ -523,6 +523,23 @@ module Ruboto
                     'org/jruby/ant',
                     'org/jruby/embed/jsr223',
                     'org/jruby/embed/osgi',
+
+                    # Never loaded on Android, so they only add size (about
+                    # 6 MB of APK): the Prism parser is opt-in
+                    # (jruby.parser.prism) and needs libprism or its wasm
+                    # runtime (shaded Chicory and redline in com/jruby/internal,
+                    # plus PrismParser.*.native blobs for desktop platforms).
+                    # The jnr asm stub compilers need native jffi, which
+                    # jruby.native.enabled=false turns off.
+                    'org/jruby/internal/prism',
+                    'org/jruby/prism',
+                    'com/jruby/internal',
+                    'META-INF/services/org.jruby.parser.ParserProvider',
+                    'META-INF/services/com.jruby.internal.io.roastedroot.redline.api.RedlineMachineFactoryProvider',
+                    'jnr/x86asm',
+                    'com/kenai/jnr/x86asm',
+                    'jnr/a64asm',
+                    'org/joni/bench',
                 ]
               elsif gem_version >= Gem::Version.new('9.2.0.0')
                 #noinspection RubyLiteralArrayInspection
