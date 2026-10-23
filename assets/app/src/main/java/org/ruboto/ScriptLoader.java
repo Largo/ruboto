@@ -98,14 +98,27 @@ public class ScriptLoader {
     count as handlers, so a callback without one never enters Ruby.
     */
     public static String rubyCallback(RubotoComponent component, int index, String camelName, String snakeName) {
+        RubyClass klass = rubyClassOf(component);
+        return klass == null ? null : component.getScriptInfo().handlerFor(klass, index, camelName, snakeName);
+    }
+
+   /**
+    Like rubyCallback(), without the per-callback cache: for the one-off calls
+    EntryPointActivity makes when it replays callbacks once JRuby is up.
+    */
+    public static String rubyHandler(RubotoComponent component, String camelName, String snakeName) {
+        RubyClass klass = rubyClassOf(component);
+        return klass == null ? null : resolveHandler(klass, camelName, snakeName);
+    }
+
+    private static RubyClass rubyClassOf(RubotoComponent component) {
         if (!JRubyAdapter.isInitialized()) return null;
-        ScriptInfo info = component.getScriptInfo();
-        Object instance = info.getRubyInstance();
+        Object instance = component.getScriptInfo().getRubyInstance();
         if (instance == null) return null;
         Ruby runtime = JRubyAdapter.getRuntime();
         IRubyObject self = instance instanceof IRubyObject ? (IRubyObject) instance
                 : JavaUtil.convertJavaToUsableRubyObject(runtime, instance);
-        return info.handlerFor(self.getMetaClass(), index, camelName, snakeName);
+        return self.getMetaClass();
     }
 
     static String resolveHandler(RubyClass klass, String camelName, String snakeName) {
