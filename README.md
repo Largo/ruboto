@@ -152,14 +152,16 @@ Time a cold start from the command line:
 ```shell
 adb shell am force-stop org.ruboto.todo && adb logcat -c
 adb shell am start -W -S -n org.ruboto.todo/.TodoActivity
-adb logcat -d -s ActivityTaskManager:I | grep 'Displayed org.ruboto.todo'
+adb logcat -d -s ActivityTaskManager:I | grep -E 'Displayed|Fully drawn'
 ```
 
-The launch activity finishes itself and shows a splash screen while JRuby
-starts, so the `TotalTime` that `am start -W` prints only reaches the splash.
-The time to the app's own screen is the second `Displayed
-org.ruboto.todo/.TodoActivity` line in logcat.  Repeat it a few times and take
-the median.
+The launch activity shows a spinner while JRuby starts, so the `TotalTime`
+that `am start -W` prints (and the `Displayed` line) only reaches the
+spinner.  The time to the app's own screen is the `Fully drawn
+org.ruboto.todo/.TodoActivity` line, which Ruboto reports once the Ruby
+`on_create` has run.  (With a `splash` layout the app starts through
+SplashActivity instead; then it is the second `Displayed` line.)  Repeat it a
+few times and take the median.
 
 Generated apps also ship a baseline profile
 (`app/src/main/baseline-prof.txt`, the JRuby methods and classes a Ruboto app
@@ -234,7 +236,7 @@ and inside `<application>`, which also wants
 
 Expect a slow first start.  JRuby's runtime initialisation is around twenty
 seconds on watch hardware before the script is even read; it happens on a
-background thread behind the splash, so it is a wait rather than a hang.
+background thread behind the start-up spinner, so it is a wait rather than a hang.
 
 ## Starting a new Ruboto project
 
@@ -441,8 +443,28 @@ Apps generated with an earlier Ruboto 2 snapshot pick these up with
   `Object`; `Kernel#old_method_missing` is gone.  `AndroidIds` and
   `Ruboto::Id` are loaded on first use, and `View.convert_constant` resolves
   symbols lazily (`View.constant_conversions` still returns the full table).
-* Without a `splash` layout the splash shows a spinner instead of a
-  `ProgressDialog`.  Back during start-up leaves the app
+* **No splash activity hop.**  On a cold start the launch activity
+  (an `EntryPointActivity`) no longer finishes itself to show SplashActivity
+  and get started again.  It stays on screen with a spinner in its content
+  area while JRuby starts on a background thread; then the Ruby `on_create`
+  runs (with the original Bundle), followed by the Ruby handlers of the
+  callbacks Android has made in the meantime: `on_start`,
+  `on_restore_instance_state`, `on_post_create`, `on_resume`,
+  `on_post_resume` and `on_window_focus_changed`, each only if the activity
+  is in that state.  `super` in these replayed handlers does nothing (Android
+  already ran it).  The options menu is rebuilt afterwards and
+  `reportFullyDrawn()` is called.  Back during start-up behaves like Back
+  anywhere else; JRuby keeps starting in the background.  An activity
+  recreated during start-up (rotation) gets `on_create` once, in the new
+  instance.
+  Because the window already exists when `on_create` runs, window features
+  (`request_window_feature`) and a theme set in `on_create` no longer change
+  the window decor.  Apps that need that, or that want their own splash
+  screen, add `res/layout/splash.xml`: they keep starting through
+  SplashActivity as before (or override `useSplashActivity` in the
+  activity's Java class).
+* The SplashActivity shows a spinner instead of a `ProgressDialog` when there
+  is no `splash` layout.  Back during start-up leaves the app
   (`finishAndRemoveTask`) instead of calling `System.exit`; JRuby keeps
   starting in the background.
 * An exception raised by `environment.rb` other than `LoadError` now fails
