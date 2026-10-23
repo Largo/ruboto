@@ -145,7 +145,7 @@ public class EntryPointActivity extends org.ruboto.RubotoActivity {
             showStartupError();
             return;
         }
-        Log.d("EntryPointActivity JRuby ready: " + getClass().getName());
+        if (JRubyAdapter.isDebugBuild()) Log.d("EntryPointActivity JRuby ready: " + getClass().getName());
         waitingForRuby = false;
         removePlaceholder();
         getScriptInfo().setRubyClassName(getClass().getSimpleName());
