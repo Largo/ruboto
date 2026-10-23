@@ -230,4 +230,20 @@ public final class Backports {
         channel.socket().shutdownOutput();
         return channel;
     }
+    // jnr-posix JavaFileStat (native POSIX off): without java.nio.file
+    // (API < 26) there are no PosixFileAttributes, isExecutable() is always
+    // false and st_mode never has execute bits, so Ruby's shell launcher
+    // rejects /system/bin/sh with EACCES (backticks, system, IO.popen).
+    // LegacyAndroidPatcher feeds calculateMode's result and isExecutable's
+    // result through these.
+    public static short withExecBits(short mode, java.io.File file) {
+        if ((mode & 0111) == 0 && (mode & 0170000) == 0100000 && file.canExecute()) {
+            return (short) (mode | 0111);
+        }
+        return mode;
+    }
+
+    public static boolean orExecBits(boolean executable, short mode) {
+        return executable || (mode & 0111) != 0;
+    }
 }

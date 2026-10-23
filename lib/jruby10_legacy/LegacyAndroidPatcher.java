@@ -248,10 +248,12 @@ public class LegacyAndroidPatcher {
             Remapper classRemapper = invokeShim && reader.getClassName().startsWith(SOCKET_PACKAGE)
                     ? SOCKET_REMAPPER : REMAPPER;
             ClassWriter writer = new ClassWriter(0);
+            final boolean javaFileStat = reader.getClassName().equals(JAVA_FILE_STAT);
             ClassVisitor rewriter = new ClassVisitor(Opcodes.ASM9, writer) {
                 @Override
                 public MethodVisitor visitMethod(int access, String name, String desc, String sig, String[] ex) {
-                    return new CallRewriter(super.visitMethod(access, name, desc, sig, ex), changed);
+                    MethodVisitor mv = new CallRewriter(super.visitMethod(access, name, desc, sig, ex), changed);
+                    return javaFileStat ? javaFileStatRewriter(mv, name, desc, changed) : mv;
                 }
             };
             ClassRemapper remapper = new ClassRemapper(Opcodes.ASM9, rewriter, classRemapper) {
@@ -347,6 +349,45 @@ public class LegacyAndroidPatcher {
                 super.visitFieldInsn(op, owner, name, desc);
             }
         }
+    }
+
+    static final String JAVA_FILE_STAT = "jnr/posix/JavaFileStat";
+
+    /**
+     * jnr-posix's JavaFileStat (used with native POSIX off) reads permissions
+     * only through java.nio.file PosixFileAttributes, which API < 26 lacks:
+     * every file looks non-executable and the shell launcher refuses
+     * /system/bin/sh.  Add execute bits from File.canExecute() to st_mode
+     * and let isExecutable() fall back to them.  Only adds a static call
+     * before the return value is returned, so no branches or frames change.
+     */
+    static MethodVisitor javaFileStatRewriter(MethodVisitor mv, String name, String desc, boolean[] changed) {
+        final boolean mode = name.equals("calculateMode") && desc.equals("(Ljava/io/File;S)S");
+        final boolean exec = name.equals("isExecutable") && desc.equals("()Z");
+        if (!mode && !exec) return mv;
+        return new MethodVisitor(Opcodes.ASM9, mv) {
+            @Override
+            public void visitInsn(int op) {
+                if (op == Opcodes.IRETURN) {
+                    if (mode) {
+                        super.visitVarInsn(Opcodes.ALOAD, 1);
+                        super.visitMethodInsn(Opcodes.INVOKESTATIC, BACKPORTS, "withExecBits", "(SLjava/io/File;)S", false);
+                    } else {
+                        super.visitVarInsn(Opcodes.ALOAD, 0);
+                        super.visitFieldInsn(Opcodes.GETFIELD, JAVA_FILE_STAT, "st_mode", "S");
+                        super.visitMethodInsn(Opcodes.INVOKESTATIC, BACKPORTS, "orExecBits", "(ZS)Z", false);
+                    }
+                    changed[0] = true;
+                    count("JavaFileStat." + (mode ? "calculateMode" : "isExecutable"));
+                }
+                super.visitInsn(op);
+            }
+
+            @Override
+            public void visitMaxs(int maxStack, int maxLocals) {
+                super.visitMaxs(maxStack + 2, maxLocals);
+            }
+        };
     }
 
     static String prepend(String owner, String desc) {

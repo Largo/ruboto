@@ -53,6 +53,18 @@ class LegacyAndroidPatcherTest < Minitest::Test
     assert_empty offending
   end
 
+  # jnr-posix's JavaFileStat reads permissions only via java.nio.file, which
+  # API < 26 lacks; the patcher adds File.canExecute() execute bits so the
+  # shell launcher accepts /system/bin/sh.
+  def test_java_file_stat_gets_execute_bits_without_nio_file
+    run!("cd #{@dir}/classes && jar xf #{@asm} jnr/posix/JavaFileStat.class")
+    patch!
+    disassembly = run!("javap -c -p -cp #{@dir}/classes jnr.posix.JavaFileStat")
+
+    assert_equal 1, disassembly.scan('Backports.withExecBits:(SLjava/io/File;)S').size
+    assert_operator disassembly.scan('Backports.orExecBits:(ZS)Z').size, :>=, 1
+  end
+
   private
 
   # Compiles the stand-in into the class tree and runs the patcher over it.
