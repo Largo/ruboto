@@ -38,7 +38,7 @@ module Ruboto
       def verify_test_manifest
         abort "cannot find your test AndroidManifest.xml to extract info from it. Make sure you're in the root directory of your app" \
             unless File.exist? 'test/AndroidManifest.xml'
-        @manifest ||= REXML::Document.new(File.read('test/AndroidManifest.xml')).root
+        @test_manifest ||= REXML::Document.new(File.read('test/AndroidManifest.xml')).root
       end
 
       def save_test_manifest
@@ -57,7 +57,9 @@ module Ruboto
 
       def verify_activity
         verify_manifest
-        @activity ||= @manifest.elements['application/activity'].attribute('android:name').value
+        @activity ||= @manifest.elements['application/activity']&.attribute('android:name')&.value
+        abort "cannot find an activity in #{MANIFEST_FILE_NAME}" unless @activity
+        @activity
       end
 
       def verify_sdk_versions
@@ -70,7 +72,7 @@ module Ruboto
       def verify_min_sdk
         return @min_sdk if @min_sdk
         verify_sdk_versions
-        min_sdk_attr = @uses_sdk.attribute('android:minSdkVersion').value
+        min_sdk_attr = @uses_sdk.attribute('android:minSdkVersion')&.value
         abort "you must specify a minimum sdk level in the manifest (e.g., <uses-sdk android:minSdkVersion='3' android:targetSdkVersion='8' />)" unless min_sdk_attr
         @min_sdk = min_sdk_attr.to_i
       end
@@ -78,7 +80,7 @@ module Ruboto
       def verify_target_sdk
         return @target_sdk if @target_sdk
         verify_sdk_versions
-        target_sdk_attr = @uses_sdk.attribute('android:targetSdkVersion').value
+        target_sdk_attr = @uses_sdk.attribute('android:targetSdkVersion')&.value
         abort "you must specify a target sdk level in the manifest (e.g., <uses-sdk android:minSdkVersion='3' android:targetSdkVersion='8' />)" unless target_sdk_attr
         @target_sdk = target_sdk_attr.to_i
       end
@@ -104,16 +106,17 @@ module Ruboto
         File.open('ruboto.yml', 'w') {|f| f << YAML.dump(verify_ruboto_config)}
       end
 
+      PROJECT_PROPERTIES_FILE_NAME = 'project.properties'
+
       def verify_project_properties
-        return @project_properties if project_properties
-        abort "cannot find your #{properties_file_name} to extract info from it. Make sure you're in the root directory of your app." unless File.exist? properties_file_name
+        project_properties ||
+            abort("cannot find your #{PROJECT_PROPERTIES_FILE_NAME} to extract info from it. Make sure you're in the root directory of your app.")
       end
 
       def project_properties
         return @project_properties if @project_properties
-        properties_file_name = 'project.properties'
-        return nil unless File.exist? properties_file_name
-        @project_properties = File.read(properties_file_name)
+        return nil unless File.exist? PROJECT_PROPERTIES_FILE_NAME
+        @project_properties = File.read(PROJECT_PROPERTIES_FILE_NAME)
       end
 
       def project_api_level
