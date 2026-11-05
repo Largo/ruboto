@@ -100,7 +100,7 @@ module Ruboto
                 argument :required
                 description "Android version to target #{VERSION_HELP_TEXT}"
                 default DEFAULT_TARGET_SDK
-                cast { |t| t =~ API_NUMBER_PATTERN ? "android-#$1" : t }
+                cast { |t| t.to_s =~ /\A\d+\z/ ? "android-#{t}" : t }
                 validate { |t| t =~ API_LEVEL_PATTERN }
               }
               option('min-sdk') {
@@ -381,7 +381,7 @@ module Ruboto
               option('target', 't') {
                 argument :required
                 description "Android version to target #{VERSION_HELP_TEXT}"
-                cast { |t| t =~ API_NUMBER_PATTERN ? "android-#$1" : t }
+                cast { |t| t.to_s =~ /\A\d+\z/ ? "android-#{t}" : t }
                 validate { |t| t =~ API_LEVEL_PATTERN }
               }
               option('with-jruby') {
@@ -397,7 +397,9 @@ module Ruboto
               def run
                 force = params['force'].value
                 old_version = read_ruboto_version
-                if old_version && Gem::Version.new(old_version) < Gem::Version.new(Ruboto::UPDATE_VERSION_LIMIT)
+                # Compare release parts so prereleases of the limit (e.g. 2.0.0.dev)
+                # are not treated as older than the limit itself.
+                if old_version && Gem::Version.new(old_version).release < Gem::Version.new(Ruboto::UPDATE_VERSION_LIMIT)
                   puts "Detected old Ruboto version: #{old_version}"
                   puts "Will use Ruboto #{Ruboto::UPDATE_VERSION_LIMIT} to update it first."
                   `gem list -i ruboto -v #{Ruboto::UPDATE_VERSION_LIMIT}`
@@ -464,7 +466,7 @@ module Ruboto
               argument :required
               default DEFAULT_TARGET_SDK
               arity -1
-              cast { |t| t =~ API_NUMBER_PATTERN ? "android-#$1" : t }
+              cast { |t| t.to_s =~ /\A\d+\z/ ? "android-#{t}" : t }
               validate { |t| t =~ API_LEVEL_PATTERN }
             }
 
@@ -504,7 +506,7 @@ module Ruboto
               required unless api_level
               argument :required
               default(api_level) if api_level
-              cast { |t| t =~ API_NUMBER_PATTERN ? "android-#$1" : t }
+              cast { |t| t.to_s =~ /\A\d+\z/ ? "android-#{t}" : t }
               validate { |t| t =~ API_LEVEL_PATTERN && sdk_level_name($2.to_i) }
             }
 

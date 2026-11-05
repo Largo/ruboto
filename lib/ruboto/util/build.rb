@@ -16,10 +16,11 @@ module Ruboto
       #
       def build_file(src, package, name, substitutions, dest='.')
         to = File.join(dest, "#{JAVA_SRC_DIR}/#{package.gsub('.', '/')}")
-        Dir.mkdir(to) unless File.directory?(to)
+        FileUtils.mkdir_p(to)
 
         text = File.read(File.expand_path(Ruboto::GEM_ROOT + "/assets/#{JAVA_SRC_DIR}/#{src}.java"))
-        substitutions.each { |k, v| text.gsub!(k, v) }
+        # Block form: replacement text must not be parsed for \1-style backreferences.
+        substitutions.each { |k, v| text.gsub!(k) { v } }
 
         File.open(File.join(to, "#{name}.java"), 'w') { |f| f << text }
       end
@@ -160,6 +161,7 @@ module Ruboto
         file = File.expand_path File.join(dest, "#{JAVA_SRC_DIR}/#{package.gsub('.', '/')}", "#{name}.java")
         text = File.read(File.join(Ruboto::ASSETS, "#{JAVA_SRC_DIR}/Inheriting#{klass}.java"))
         file_existed = File.exist?(file)
+        FileUtils.mkdir_p(File.dirname(file))
         File.open(file, 'w') do |f|
           f << text.gsub('THE_PACKAGE', package).gsub("Sample#{klass}", name).gsub("Inheriting#{klass}", name).gsub("sample_#{underscore(klass)}.rb", script_name)
         end

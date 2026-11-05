@@ -44,12 +44,15 @@ module Ruboto
       def find_class_or_interface(klass, a_type)
         abort "ERROR: Can't parse package from #{klass}" unless klass.match(/([a-z.]+)\.([A-Z][A-Za-z.]+)/)
 
-        package = self['package'].find { |i| i.attribute('name') == $1 }
-        abort "ERROR: Can't find package #{$1}" unless package
+        package_name = $1
+        class_name = $2
+        package = get_elements('package').find { |i| i.attribute('name') == package_name }
+        abort "ERROR: Can't find package #{package_name}" unless package
         if a_type == 'either'
-          package['class'].find { |i| i.attribute('name') == $2 } or package['interface'].find { |i| i.attribute('name') == $2 }
+          package.get_elements('class').find { |i| i.attribute('name') == class_name } ||
+              package.get_elements('interface').find { |i| i.attribute('name') == class_name }
         else
-          package[a_type].find { |i| i.attribute('name') == $2 }
+          package.get_elements(a_type).find { |i| i.attribute('name') == class_name }
         end
       end
 
@@ -63,23 +66,25 @@ module Ruboto
 
       def all_methods(method_base='all', method_include='', method_exclude='', implements='')
         # get all the methogs
-        all_methods = get_elements('method').select { |m| m.attribute('static') != 'true' }
+        all_methods = get_elements('method').select { |m| m.attribute('static') != 'true' }.freeze
 
         # establish the base set of methods
         working_methods = case method_base.to_s
                           when 'all' then
-                            all_methods
+                            all_methods.dup
                           when 'none' then
                             []
                           when 'abstract' then
                             all_methods.select { |i| i.attribute('abstract') == 'true' }
                           when 'on' then
                             all_methods.select { |i| i.attribute('name').match(/^on[A-Z]/) }
+                          else
+                            abort "Unknown method_base: #{method_base}"
                           end
 
         # make sure to include requested methods
         include_methods = method_include.split(',') if method_include.is_a?(String)
-        all_methods.each { |i| working_methods << i if include_methods.include?(i.attribute('name')) }
+        all_methods.each { |i| working_methods << i if include_methods.include?(i.attribute('name')) && !working_methods.include?(i) }
 
         # make sure to exclude rejected methods
         exclude_methods = method_exclude.split(',') if method_exclude.is_a?(String)
@@ -91,6 +96,7 @@ module Ruboto
         # get additional methods from parent
         if name =='class' and attribute('extends')
           parent = root.find_class(attribute('extends'))
+          abort("Unknown parent class: #{attribute('extends')}") unless parent
           parent_methods = parent.all_methods(method_base, method_include, method_exclude)
           working_signatures = working_methods.map(&:method_signature)
           working_methods += parent_methods.select { |i| not working_signatures.include?(i.method_signature) }
