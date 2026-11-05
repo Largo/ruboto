@@ -26,7 +26,7 @@ module Ruboto
       end
 
       def gradle_build_file
-        [APP_BUILD_GRADLE_FILE_NAME, "#{APP_BUILD_GRADLE_FILE_NAME}.kts"].find { |f| File.exist?(f) }
+        app_build_gradle_file
       end
 
       # Directory holding res/ and AndroidManifest.xml.
@@ -36,6 +36,11 @@ module Ruboto
 
       def update_android(target_level = nil)
         if gradle_project?
+          # Checked before anything is written: update_manifest would raise a
+          # lower target to minSdk and leave Gradle and the manifest disagreeing.
+          if target_level && target_level.to_i < project_min_sdk_level
+            abort "Target API level #{target_level} is below the app's minSdk #{project_min_sdk_level}."
+          end
           update_gradle_target_level(target_level) if target_level
           if target_level && File.exist?('project.properties')
             update_project_properties_target_level('project.properties', target_level)
@@ -60,7 +65,15 @@ module Ruboto
       def update_gradle_target_level(target_level)
         file = gradle_build_file
         gradle = File.read(file)
-        updated = gradle.gsub(/^(\s*(?:compileSdk|targetSdk)(?:Version)?\s*(?:=\s*)?)\d+/) { "#{Regexp.last_match(1)}#{target_level}" }
+        sdk_declaration = /^(\s*(?:compileSdk|targetSdk)(?:Version)?\s*(?:=\s*|\(\s*)?)(["']?)((?:android-)?)\d+\2/
+        updated = gradle.gsub(sdk_declaration) do
+          m = Regexp.last_match
+          "#{m[1]}#{m[2]}#{m[3]}#{target_level}#{m[2]}"
+        end
+        unless gradle.match?(sdk_declaration)
+          puts "WARNING: no literal compileSdk/targetSdk found in #{file}; set them to #{target_level} yourself."
+          return
+        end
         return if updated == gradle
 
         log_action("Setting compileSdk and targetSdk to #{target_level} in #{file}") do

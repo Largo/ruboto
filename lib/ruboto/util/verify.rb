@@ -12,12 +12,20 @@ module Ruboto
       MANIFEST_FILE_NAME = 'app/src/main/AndroidManifest.xml'
       APP_BUILD_GRADLE_FILE_NAME = 'app/build.gradle'
 
+      APP_BUILD_GRADLE_FILE_NAMES = [APP_BUILD_GRADLE_FILE_NAME, "#{APP_BUILD_GRADLE_FILE_NAME}.kts"].freeze
+
+      # app/build.gradle or, for the Kotlin DSL, app/build.gradle.kts.
+      def app_build_gradle_file
+        APP_BUILD_GRADLE_FILE_NAMES.find { |f| File.exist?(f) }
+      end
+
       def verify_app_build_gradle(reload: false)
         return @app_build_gradle if @app_build_gradle && !reload
-        unless File.exist? APP_BUILD_GRADLE_FILE_NAME
+        file = app_build_gradle_file
+        unless file
           abort "cannot find your #{APP_BUILD_GRADLE_FILE_NAME} to extract info from it. Make sure you're in the root directory of your app."
         end
-        @app_build_gradle = File.read(APP_BUILD_GRADLE_FILE_NAME)
+        @app_build_gradle = File.read(file)
       end
 
       def verify_manifest(reload: false)
@@ -46,9 +54,13 @@ module Ruboto
       end
 
       def verify_package
-        verify_app_build_gradle
-        @package ||= @app_build_gradle[/(?<=namespace ["'])([^"']+)/]
         return @package if @package
+        if app_build_gradle_file
+          verify_app_build_gradle
+          # Groovy: namespace 'org.example'  Kotlin DSL: namespace = "org.example"
+          @package = @app_build_gradle[/\bnamespace\s*(?:=\s*)?["']([^"']+)["']/, 1]
+          return @package if @package
+        end
         verify_manifest
         @package ||= @manifest.attribute('package')&.value
         abort "You must specify your application package name in #{APP_BUILD_GRADLE_FILE_NAME} or in the manifest." unless @package
@@ -85,11 +97,15 @@ module Ruboto
         @target_sdk = target_sdk_attr.to_i
       end
 
-      STRINGS_FILE_NAMES = %w[app/src/main/res/values/strings.xml res/values/strings.xml].freeze
+      GRADLE_STRINGS_FILE_NAME = 'app/src/main/res/values/strings.xml'
+      ANT_STRINGS_FILE_NAME = 'res/values/strings.xml'
 
       def verify_strings
         return @strings if @strings
-        strings_file = STRINGS_FILE_NAMES.find { |f| File.exist?(f) }
+        # Prefer the file the project's build actually uses.
+        candidates = [GRADLE_STRINGS_FILE_NAME, ANT_STRINGS_FILE_NAME]
+        candidates.reverse! unless app_build_gradle_file
+        strings_file = candidates.find { |f| File.exist?(f) }
         abort "cannot find your strings.xml to extract info from it. Make sure you're in the root directory of your app" unless strings_file
         @strings = REXML::Document.new(File.read(strings_file))
       end
