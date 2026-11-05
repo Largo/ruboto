@@ -85,9 +85,13 @@ module Ruboto
         @target_sdk = target_sdk_attr.to_i
       end
 
+      STRINGS_FILE_NAMES = %w[app/src/main/res/values/strings.xml res/values/strings.xml].freeze
+
       def verify_strings
-        abort "cannot find your strings.xml to extract info from it. Make sure you're in the root directory of your app" unless File.exist? 'res/values/strings.xml'
-        @strings ||= REXML::Document.new(File.read('res/values/strings.xml'))
+        return @strings if @strings
+        strings_file = STRINGS_FILE_NAMES.find { |f| File.exist?(f) }
+        abort "cannot find your strings.xml to extract info from it. Make sure you're in the root directory of your app" unless strings_file
+        @strings = REXML::Document.new(File.read(strings_file))
       end
 
       def verify_api
