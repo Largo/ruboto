@@ -409,6 +409,7 @@ module Ruboto
                   raise "Ruboto update app to #{Ruboto::UPDATE_VERSION_LIMIT} failed!" unless $? == 0
                 end
 
+                target_level = nil
                 if (target = params['target'].value)
                   unless target =~ API_LEVEL_PATTERN
                     abort "Target must match #{API_LEVEL_PATTERN}: got #{target}"
@@ -431,7 +432,7 @@ module Ruboto
                 update_classes old_version, force
                 update_dx_jar force
                 update_jruby force, params['with-jruby'].value
-                update_manifest nil, nil, force
+                update_manifest nil, target_level, force
                 update_icons force
                 update_core_classes 'exclude'
                 update_bundle
